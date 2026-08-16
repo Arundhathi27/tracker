@@ -6,7 +6,7 @@ import {
 import { router } from 'expo-router';
 import {
   User, Mail, Calendar, KeyRound, Settings as SettingsIcon,
-  LogOut, ChevronRight, TrendingUp, Wallet, PieChart
+  LogOut, ChevronRight, TrendingUp, Wallet, PieChart, CheckSquare
 } from 'lucide-react-native';
 import { useAuthStore } from '@/store';
 import { Header } from '@/components/ui/Header';
@@ -246,6 +246,19 @@ export default function ProfileScreen() {
           <View style={styles.section}>
             <Text style={styles.sectionTitle}>App</Text>
             <View style={styles.card}>
+              <TouchableOpacity
+                style={[styles.cardRow, { borderBottomWidth: 1, borderBottomColor: Colors.border.DEFAULT }]}
+                onPress={() => router.push('/(app)/fixed-expenses' as any)}
+              >
+                <View style={styles.cardRowLeft}>
+                  <View style={[styles.infoIcon, { backgroundColor: `${Colors.primary.DEFAULT}15` }]}>
+                    <CheckSquare size={16} color={Colors.primary.DEFAULT} />
+                  </View>
+                  <Text style={styles.cardRowText}>Fixed Expenses Checklist</Text>
+                </View>
+                <ChevronRight size={18} color={Colors.text.tertiary} />
+              </TouchableOpacity>
+
               <TouchableOpacity
                 style={styles.cardRow}
                 onPress={() => router.push('/(app)/settings' as any)}

@@ -1,6 +1,6 @@
 import React from 'react';
-import { View, Text, StyleSheet, FlatList, ActivityIndicator, Pressable } from 'react-native';
-import { router } from 'expo-router';
+import { View, Text, StyleSheet, FlatList, ActivityIndicator, Pressable, RefreshControl } from 'react-native';
+import { router, useFocusEffect } from 'expo-router';
 import { Plus, ChevronRight, PieChart } from 'lucide-react-native';
 import { useMonthlyBudgets } from '@/hooks/useBudgets';
 import { Header } from '@/components/ui/Header';
@@ -8,11 +8,13 @@ import { Button } from '@/components/ui/Button';
 import { Colors } from '@/constants/colors';
 import { Theme } from '@/constants/theme';
 import { formatCurrency } from '@/utils/formatters';
+import { getBudgetStatus } from '@/utils/budgetStatus';
 import { MonthlyBudget } from '@/types';
 
 function MonthlyBudgetCard({ budget, onPress }: { budget: MonthlyBudget; onPress: (b: MonthlyBudget) => void }) {
   const spent = budget.budget_categories?.reduce((acc, cat) => acc + cat.spent, 0) || 0;
-  const progress = Math.min(spent / budget.total_amount, 1) * 100;
+  const status = getBudgetStatus(budget.total_amount, spent);
+  const progress = Math.min((spent / (budget.total_amount || 1)) * 100, 100);
   
   return (
     <Pressable style={styles.card} onPress={() => onPress(budget)}>
@@ -29,13 +31,13 @@ function MonthlyBudgetCard({ budget, onPress }: { budget: MonthlyBudget; onPress
             style={[
               styles.progressBarFill, 
               { width: `${progress}%` },
-              progress > 90 ? { backgroundColor: Colors.danger.DEFAULT } : {}
+              status.status === 'over' ? { backgroundColor: Colors.danger.DEFAULT } : {}
             ]} 
           />
         </View>
         <View style={styles.progressLabels}>
           <Text style={styles.progressLabel}>{formatCurrency(spent)} spent</Text>
-          <Text style={styles.progressLabel}>{formatCurrency(budget.total_amount - spent)} left</Text>
+          <Text style={[styles.progressLabel, { color: status.color }]}>{status.label}</Text>
         </View>
       </View>
     </Pressable>
@@ -43,7 +45,13 @@ function MonthlyBudgetCard({ budget, onPress }: { budget: MonthlyBudget; onPress
 }
 
 export default function BudgetsOverviewScreen() {
-  const { data: budgets, isLoading } = useMonthlyBudgets();
+  const { data: budgets, isLoading, refetch } = useMonthlyBudgets();
+
+  useFocusEffect(
+    React.useCallback(() => {
+      refetch();
+    }, [refetch])
+  );
 
   const renderEmptyComponent = () => {
     if (isLoading) {
@@ -79,6 +87,9 @@ export default function BudgetsOverviewScreen() {
           data={budgets || []}
           keyExtractor={(item) => item.id}
           contentContainerStyle={styles.listContent}
+          refreshControl={
+            <RefreshControl refreshing={isLoading} onRefresh={refetch} tintColor={Colors.primary.DEFAULT} />
+          }
           renderItem={({ item }) => (
             <MonthlyBudgetCard 
               budget={item} 

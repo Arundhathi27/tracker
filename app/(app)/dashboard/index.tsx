@@ -7,7 +7,7 @@ import { router } from 'expo-router';
 import {
   ShoppingBag, Coffee, Car, Zap, Utensils,
   Smartphone, Heart, GraduationCap, PiggyBank, Briefcase, HelpCircle,
-  Plus, LogOut, ArrowRight, Calendar as CalendarIcon, Target, CheckCircle2
+  Plus, LogOut, ArrowRight, Calendar as CalendarIcon, Target, CheckCircle2, ClipboardList
 } from 'lucide-react-native';
 import { useAuthStore } from '@/store';
 import { useMonthlyBudgetByMonth, useBudgetCategories } from '@/hooks/useBudgets';
@@ -17,6 +17,8 @@ import { useSavingsGoals } from '@/hooks/useSavingsGoals';
 import { Colors } from '@/constants/colors';
 import { Theme } from '@/constants/theme';
 import { formatCurrency } from '@/utils/formatters';
+import { getBudgetStatus } from '@/utils/budgetStatus';
+import { generateSpendingInsights } from '@/utils/spendingInsights';
 import { BudgetCategory, Transaction } from '@/types';
 
 // ─── Icon map (matches Budget Module icons) ───────────────────────────────────
@@ -61,7 +63,7 @@ function CategoryRow({ cat }: { cat: BudgetCategory }) {
   const color = cat.color || Colors.primary.DEFAULT;
   const allocated = cat.allocated_amount;
   const spent = cat.spent_amount;
-  const remaining = allocated - spent;
+  const status = getBudgetStatus(allocated, spent);
   const progress = allocated > 0 ? spent / allocated : 0;
 
   return (
@@ -74,11 +76,11 @@ function CategoryRow({ cat }: { cat: BudgetCategory }) {
           <Text style={styles.catName}>{cat.name}</Text>
           <Text style={styles.catAllocated}>{formatCurrency(allocated)}</Text>
         </View>
-        <ProgressBar progress={progress} color={color} />
+        <ProgressBar progress={progress} color={status.status === 'over' ? Colors.danger.DEFAULT : color} />
         <View style={styles.catBottomRow}>
           <Text style={styles.catSpent}>Spent {formatCurrency(spent)}</Text>
-          <Text style={[styles.catRemaining, remaining < 0 && { color: Colors.danger.DEFAULT }]}>
-            {remaining >= 0 ? `Remaining ${formatCurrency(remaining)}` : `Over by ${formatCurrency(-remaining)}`}
+          <Text style={[styles.catRemaining, { color: status.color }]}>
+            {status.label}
           </Text>
         </View>
       </View>
@@ -182,6 +184,15 @@ export default function DashboardScreen() {
   
   const overallProgress = totalBudget > 0 ? totalSpent / totalBudget : 0;
   const overallPct = Math.round(Math.min(overallProgress, 1) * 100);
+
+  const dashboardInsights = React.useMemo(() => {
+    const structuredCats = (categories || []).map(c => ({
+      name: c.name,
+      allocated_amount: c.allocated_amount,
+      spent_amount: c.spent_amount,
+    }));
+    return generateSpendingInsights(totalBudget, structuredCats, totalSpent, (recentExpenses || []).length > 0);
+  }, [categories, totalBudget, totalSpent, recentExpenses]);
 
   const greeting = getGreeting();
   const firstName = user?.full_name?.split(' ')[0] || 'there';
@@ -289,31 +300,59 @@ export default function DashboardScreen() {
           </View>
         </View>
 
-        {/* ── Category Overview ── */}
+        {/* ── Budget Status Section ── */}
         <View style={styles.section}>
           <View style={styles.sectionHeader}>
-            <Text style={styles.sectionTitle}>Categories</Text>
-            <Pressable onPress={() => router.push(`/(app)/budget/${budget?.id}` as any)}>
-              <Text style={styles.seeAll}>Manage</Text>
+            <Text style={styles.sectionTitle}>Budget Status</Text>
+            <Pressable onPress={() => router.push('/(app)/budget-status' as any)}>
+              <Text style={styles.seeAll}>View Report →</Text>
             </Pressable>
           </View>
           {loadingCats ? (
             <ActivityIndicator size="small" color={Colors.primary.DEFAULT} style={{ marginVertical: 16 }} />
           ) : categories && categories.length > 0 ? (
             <View style={styles.categoriesList}>
-              {categories.map((cat: BudgetCategory) => (
-                <CategoryRow key={cat.id} cat={cat} />
-              ))}
+              {categories.map((cat: BudgetCategory) => {
+                const IconComp = ICON_MAP[cat.icon] || HelpCircle;
+                const status = getBudgetStatus(cat.allocated_amount, cat.spent_amount);
+                const progress = cat.allocated_amount > 0 ? cat.spent_amount / cat.allocated_amount : 0;
+                const catColor = cat.color || Colors.primary.DEFAULT;
+
+                return (
+                  <View key={`status-${cat.id}`} style={styles.budgetStatusCard}>
+                    <View style={styles.budgetStatusHeader}>
+                      <View style={{ flexDirection: 'row', alignItems: 'center', gap: 10 }}>
+                        <View style={[styles.statusCatIconWrap, { backgroundColor: `${catColor}20` }]}>
+                          <IconComp size={18} color={catColor} />
+                        </View>
+                        <Text style={styles.catNameText}>{cat.name}</Text>
+                      </View>
+                      <Text style={styles.budgetRatioText}>
+                        {formatCurrency(cat.spent_amount)} / {formatCurrency(cat.allocated_amount)}
+                      </Text>
+                    </View>
+                    <ProgressBar progress={progress} color={status.color} />
+                    <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' }}>
+                      <Text style={[styles.statusLabelText, { color: status.color }]}>
+                        {status.label}
+                      </Text>
+                      <Text style={[styles.statusTagText, { color: status.color, backgroundColor: `${status.color}15` }]}>
+                        {status.status.toUpperCase()}
+                      </Text>
+                    </View>
+                  </View>
+                );
+              })}
             </View>
           ) : (
             <View style={styles.emptyBox}>
-              <Text style={styles.emptyText}>No categories set for this month.</Text>
+              <Text style={styles.emptyText}>No category budgets yet</Text>
               <Pressable
                 style={styles.emptyActionBtn}
-                onPress={() => router.push(`/(app)/budget/${budget?.id}` as any)}
+                onPress={() => router.push('/(app)/budget' as any)}
               >
                 <Plus size={14} color={Colors.primary.DEFAULT} />
-                <Text style={styles.emptyActionText}>Add Category</Text>
+                <Text style={styles.emptyActionText}>Set Up Budget</Text>
               </Pressable>
             </View>
           )}
@@ -458,7 +497,9 @@ export default function DashboardScreen() {
               </View>
               <Text style={styles.actionLabel}>Add Goal</Text>
             </Pressable>
+          </View>
 
+          <View style={[styles.actionsRow, { marginTop: 12 }]}>
             <Pressable
               style={[styles.actionCard, { borderColor: Colors.primary.DEFAULT + '40' }]}
               onPress={() => router.push('/(app)/calendar' as any)}
@@ -467,6 +508,16 @@ export default function DashboardScreen() {
                 <CalendarIcon size={22} color={Colors.primary.DEFAULT} />
               </View>
               <Text style={styles.actionLabel}>Calendar View</Text>
+            </Pressable>
+
+            <Pressable
+              style={[styles.actionCard, { borderColor: Colors.primary.DEFAULT + '40' }]}
+              onPress={() => router.push('/(app)/fixed-expenses' as any)}
+            >
+              <View style={[styles.actionIcon, { backgroundColor: `${Colors.primary.DEFAULT}15` }]}>
+                <ClipboardList size={22} color={Colors.primary.DEFAULT} />
+              </View>
+              <Text style={styles.actionLabel}>Fixed Bills</Text>
             </Pressable>
           </View>
         </View>
@@ -780,5 +831,70 @@ const styles = StyleSheet.create({
     fontSize: 15,
     fontWeight: '700',
     color: Colors.white,
+  },
+  // Insights
+  insightsCard: {
+    backgroundColor: Colors.surface.DEFAULT,
+    borderRadius: Theme.radius.lg,
+    padding: 16,
+    borderWidth: 1,
+    borderColor: Colors.border.DEFAULT,
+    gap: 12,
+    ...Theme.shadows.sm,
+  },
+  insightRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 10,
+  },
+  insightText: {
+    flex: 1,
+    fontSize: 13,
+    color: Colors.text.primary,
+    fontWeight: '500',
+    lineHeight: 18,
+  },
+  // Budget Status section
+  budgetStatusCard: {
+    backgroundColor: Colors.surface.DEFAULT,
+    borderRadius: Theme.radius.lg,
+    padding: 14,
+    borderWidth: 1,
+    borderColor: Colors.border.DEFAULT,
+    ...Theme.shadows.sm,
+  },
+  budgetStatusHeader: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+  },
+  statusCatIconWrap: {
+    width: 32,
+    height: 32,
+    borderRadius: 16,
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  catNameText: {
+    fontSize: 14,
+    fontWeight: '700',
+    color: Colors.text.primary,
+  },
+  budgetRatioText: {
+    fontSize: 13,
+    fontWeight: '600',
+    color: Colors.text.secondary,
+  },
+  statusLabelText: {
+    fontSize: 13,
+    fontWeight: '700',
+  },
+  statusTagText: {
+    fontSize: 10,
+    fontWeight: '800',
+    paddingHorizontal: 8,
+    paddingVertical: 2,
+    borderRadius: Theme.radius.full,
+    letterSpacing: 0.5,
   },
 });

@@ -15,7 +15,7 @@ async function ensureProfile(session: Session): Promise<Profile | null> {
   const userId = session.user.id;
 
   // 1. Try to fetch existing profile
-  const { data: existing, error: fetchError } = await supabase
+  const { data: existing } = await supabase
     .from('profiles')
     .select('*')
     .eq('id', userId)

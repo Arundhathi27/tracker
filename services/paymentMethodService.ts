@@ -10,9 +10,13 @@ export type UpdatePaymentMethodDto = Partial<CreatePaymentMethodDto>;
 class PaymentMethodService extends BaseService {
   async getPaymentMethods(): Promise<PaymentMethod[]> {
     try {
+      const { data: userData, error: userError } = await this.supabase.auth.getUser();
+      if (userError) throw userError;
+
       const { data, error } = await this.supabase
         .from('payment_methods')
         .select('*')
+        .eq('user_id', userData.user.id)
         .order('created_at', { ascending: true });
 
       if (error) throw error;
@@ -24,9 +28,13 @@ class PaymentMethodService extends BaseService {
 
   async getPaymentMethodById(id: string): Promise<PaymentMethod> {
     try {
+      const { data: userData, error: userError } = await this.supabase.auth.getUser();
+      if (userError) throw userError;
+
       const { data, error } = await this.supabase
         .from('payment_methods')
         .select('*')
+        .eq('user_id', userData.user.id)
         .eq('id', id)
         .single();
 

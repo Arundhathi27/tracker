@@ -3,7 +3,7 @@ import {
   View, Text, StyleSheet, FlatList, ActivityIndicator,
   TouchableOpacity, TextInput, Alert, Pressable, ScrollView
 } from 'react-native';
-import { router } from 'expo-router';
+import { router, useFocusEffect } from 'expo-router';
 import {
   Plus, Search, ChevronLeft, ChevronRight,
   Filter, ArrowDownUp, Banknote, Edit2, Trash2
@@ -49,10 +49,16 @@ export default function IncomeListScreen() {
     };
   }, [selectedMonth.value]);
 
-  const { data: incomeList, isLoading } = useIncomeList({
+  const { data: incomeList, isLoading, refetch } = useIncomeList({
     dateStart,
     dateEnd,
   });
+
+  useFocusEffect(
+    React.useCallback(() => {
+      refetch();
+    }, [refetch])
+  );
 
   const deleteIncome = useDeleteIncome();
 

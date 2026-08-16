@@ -2,6 +2,7 @@ import { create } from 'zustand';
 import type { Profile } from '@/types';
 
 import { supabase } from '@/lib/supabase';
+import { queryClient } from '@/lib/queryClient';
 import { Session } from '@supabase/supabase-js';
 
 // ─── Auth Store ────────────────────────────────────────────────────────────
@@ -18,7 +19,6 @@ interface AuthState {
   login: (email: string, password: string) => Promise<{ error: Error | null }>;
   signup: (email: string, password: string, fullName: string) => Promise<{ error: Error | null }>;
   logout: () => Promise<{ error: Error | null }>;
-  resetPassword: (email: string) => Promise<{ error: Error | null }>;
   refreshSession: () => Promise<void>;
 }
 
@@ -67,17 +67,9 @@ export const useAuthStore = create<AuthState>((set, get) => ({
     set({ isLoading: true });
     const { error } = await supabase.auth.signOut();
     if (!error) {
+      queryClient.clear();
       set({ session: null, user: null, isAuthenticated: false });
     }
-    set({ isLoading: false });
-    return { error };
-  },
-
-  resetPassword: async (email) => {
-    set({ isLoading: true });
-    const { error } = await supabase.auth.resetPasswordForEmail(email, {
-      redirectTo: 'budgetwise://reset-password',
-    });
     set({ isLoading: false });
     return { error };
   },

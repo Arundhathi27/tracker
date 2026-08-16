@@ -9,6 +9,7 @@ import { CategoryModal } from '@/components/budget/CategoryModal';
 import { Colors } from '@/constants/colors';
 import { Theme } from '@/constants/theme';
 import { formatCurrency } from '@/utils/formatters';
+import { getBudgetStatus } from '@/utils/budgetStatus';
 import { BudgetCategory } from '@/types';
 import { EditBudgetModal } from '@/components/budget/EditBudgetModal';
 import { ProgressBar } from '@/components/ui/ProgressBar';
@@ -23,14 +24,14 @@ export default function BudgetDetailScreen() {
   const { data: categories, isLoading: isFetchingCategories } = useBudgetCategories(id);
   
   const { mutateAsync: deleteBudget } = useDeleteMonthlyBudget();
+  const { mutateAsync: updateBudget } = useUpdateMonthlyBudget();
   const { mutateAsync: createCategory } = useCreateBudgetCategory();
   const { mutateAsync: updateCategory } = useUpdateBudgetCategory();
   const { mutateAsync: deleteCategory } = useDeleteBudgetCategory();
-  const { mutateAsync: updateBudget } = useUpdateMonthlyBudget();
 
-  const [modalVisible, setModalVisible] = useState(false);
-  const [editBudgetVisible, setEditBudgetVisible] = useState(false);
+  const [categoryModalVisible, setCategoryModalVisible] = useState(false);
   const [editingCategory, setEditingCategory] = useState<BudgetCategory | null>(null);
+  const [editBudgetVisible, setEditBudgetVisible] = useState(false);
 
   const handleDeleteBudget = () => {
     Alert.alert('Delete Budget', 'Are you sure you want to delete this monthly budget?', [
@@ -42,7 +43,9 @@ export default function BudgetDetailScreen() {
           try {
             await deleteBudget(id);
             router.back();
-          } catch (error) {}
+          } catch (err: any) {
+            Alert.alert('Error', err.message || 'Failed to delete budget');
+          }
         }
       }
     ]);
@@ -57,7 +60,9 @@ export default function BudgetDetailScreen() {
         onPress: async () => {
           try {
             await deleteCategory({ id: catId, monthlyBudgetId: id });
-          } catch (error) {}
+          } catch (err: any) {
+            Alert.alert('Error', err.message || 'Failed to delete category');
+          }
         }
       }
     ]);
@@ -65,12 +70,12 @@ export default function BudgetDetailScreen() {
 
   const handleOpenAdd = () => {
     setEditingCategory(null);
-    setModalVisible(true);
+    setCategoryModalVisible(true);
   };
 
-  const handleOpenEdit = (category: BudgetCategory) => {
-    setEditingCategory(category);
-    setModalVisible(true);
+  const handleOpenEdit = (cat: BudgetCategory) => {
+    setEditingCategory(cat);
+    setCategoryModalVisible(true);
   };
 
   const handleSaveCategory = async (data: { name: string; icon: string; color: string; allocated_amount: number }) => {
@@ -78,43 +83,45 @@ export default function BudgetDetailScreen() {
       await updateCategory({
         id: editingCategory.id,
         monthlyBudgetId: id,
-        dto: data,
+        dto: {
+          name: data.name,
+          icon: data.icon,
+          color: data.color,
+          allocated_amount: data.allocated_amount,
+        },
       });
     } else {
       await createCategory({
-        ...data,
         monthly_budget_id: id,
+        name: data.name,
+        icon: data.icon,
+        color: data.color,
+        allocated_amount: data.allocated_amount,
       });
     }
   };
 
   if (isFetchingBudget) {
     return (
-      <View style={styles.container}>
-        <Header showBack title="Budget Details" />
-        <View style={styles.centerContainer}>
-          <ActivityIndicator size="large" color={Colors.primary.DEFAULT} />
-        </View>
+      <View style={[styles.container, styles.centerContainer]}>
+        <ActivityIndicator size="large" color={Colors.primary.DEFAULT} />
       </View>
     );
   }
 
   if (!budget) {
     return (
-      <View style={styles.container}>
-        <Header showBack title="Not Found" />
-        <View style={styles.centerContainer}>
-          <Text style={styles.errorText}>Budget not found</Text>
-        </View>
+      <View style={[styles.container, styles.centerContainer]}>
+        <Text style={styles.errorText}>Budget not found.</Text>
+        <Button label="Go Back" onPress={() => router.back()} style={{ marginTop: 16 }} />
       </View>
     );
   }
 
-  const allocated = categories?.reduce((sum, cat) => sum + cat.allocated_amount, 0) || 0;
   const totalSpent = categories?.reduce((sum, cat) => sum + cat.spent_amount, 0) || 0;
-  const remaining = budget.total_amount - totalSpent;
+  const mainStatus = getBudgetStatus(budget.total_amount, totalSpent);
   const progress = budget.total_amount > 0 ? Math.min(totalSpent / budget.total_amount, 1) : 0;
-  const progressPct = Math.round(progress * 100);
+  const progressPct = Math.round((totalSpent / (budget.total_amount || 1)) * 100);
 
   const handleUpdateBudget = async (newAmount: number) => {
     await updateBudget({
@@ -160,17 +167,17 @@ export default function BudgetDetailScreen() {
               <Text style={[styles.summaryVal, { color: Colors.danger.DEFAULT }]}>{formatCurrency(totalSpent)}</Text>
             </View>
             <View style={styles.summaryCol}>
-              <Text style={styles.summaryLabel}>Remaining</Text>
-              <Text style={[styles.summaryVal, { color: remaining >= 0 ? Colors.success.DEFAULT : Colors.danger.DEFAULT }]}>{formatCurrency(remaining)}</Text>
+              <Text style={styles.summaryLabel}>Status</Text>
+              <Text style={[styles.summaryVal, { color: mainStatus.color }]}>{mainStatus.label}</Text>
             </View>
           </View>
 
           <View style={styles.progressContainer}>
             <View style={styles.progressHeader}>
               <Text style={styles.progressLabelText}>Budget Progress</Text>
-              <Text style={[styles.progressPctText, progressPct > 90 ? { color: Colors.danger.DEFAULT } : {}]}>{progressPct}% Used</Text>
+              <Text style={[styles.progressPctText, mainStatus.status === 'over' ? { color: Colors.danger.DEFAULT } : {}]}>{progressPct}% Used</Text>
             </View>
-            <ProgressBar progress={progress} />
+            <ProgressBar progress={progress} color={mainStatus.status === 'over' ? Colors.danger.DEFAULT : Colors.primary.DEFAULT} />
           </View>
         </View>
 
@@ -187,6 +194,7 @@ export default function BudgetDetailScreen() {
           ) : (
             categories?.map(cat => {
               const IconComp = ICON_MAP[cat.icon] || ShoppingBag;
+              const catStatus = getBudgetStatus(cat.allocated_amount, cat.spent_amount);
               return (
                 <Pressable key={cat.id} style={styles.categoryRow} onPress={() => handleOpenEdit(cat)}>
                   <View style={[styles.iconWrapper, { backgroundColor: `${cat.color}20` }]}>
@@ -194,7 +202,9 @@ export default function BudgetDetailScreen() {
                   </View>
                   <View style={styles.catInfo}>
                     <Text style={styles.catName}>{cat.name}</Text>
-                    <Text style={styles.catAmount}>{formatCurrency(cat.allocated_amount)}</Text>
+                    <Text style={styles.catAmount}>
+                      {formatCurrency(cat.allocated_amount)} • <Text style={{ color: catStatus.color }}>{catStatus.label}</Text>
+                    </Text>
                   </View>
                   <View style={styles.catActions}>
                     <Button
@@ -224,8 +234,8 @@ export default function BudgetDetailScreen() {
       </View>
 
       <CategoryModal
-        visible={modalVisible}
-        onClose={() => setModalVisible(false)}
+        visible={categoryModalVisible}
+        onClose={() => setCategoryModalVisible(false)}
         onSave={handleSaveCategory}
         budget={budget}
         categories={categories || []}

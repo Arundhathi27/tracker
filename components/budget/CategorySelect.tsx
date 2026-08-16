@@ -4,6 +4,7 @@ import { useBudgetCategories, useMonthlyBudgetByMonth } from '@/hooks/useBudgets
 import { BudgetCategory } from '@/types';
 import { Colors } from '@/constants/colors';
 import { Theme } from '@/constants/theme';
+import { getBudgetStatus } from '@/utils/budgetStatus';
 import {
   ShoppingBag, Coffee, Car, Zap, Utensils,
   Smartphone, Heart, GraduationCap, PiggyBank, Briefcase, HelpCircle
@@ -58,7 +59,7 @@ export const CategorySelect: React.FC<CategorySelectProps> = ({ value, onChange,
             const iconName = cat.icon || 'HelpCircle';
             const iconColor = cat.color || Colors.primary.DEFAULT;
             const IconComp = ICON_MAP[iconName] || HelpCircle;
-            const remaining = cat.allocated_amount - cat.spent_amount;
+            const status = getBudgetStatus(cat.allocated_amount, cat.spent_amount);
 
             return (
               <TouchableOpacity
@@ -76,8 +77,8 @@ export const CategorySelect: React.FC<CategorySelectProps> = ({ value, onChange,
                 <Text style={[styles.catName, isSelected && { color: iconColor }]} numberOfLines={1}>
                   {cat.name}
                 </Text>
-                <Text style={styles.catRemaining} numberOfLines={1}>
-                  ₹{remaining.toLocaleString('en-IN')} left
+                <Text style={[styles.catRemaining, { color: status.status === 'over' ? status.color : Colors.text.tertiary }]} numberOfLines={1}>
+                  {status.label}
                 </Text>
               </TouchableOpacity>
             );

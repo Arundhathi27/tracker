@@ -106,15 +106,6 @@ export default function LoginScreen() {
               )}
             />
 
-            <View style={styles.forgotPasswordContainer}>
-              <Text 
-                style={styles.forgotPasswordText}
-                onPress={() => router.push('/(auth)/forgot-password')}
-              >
-                Forgot Password?
-              </Text>
-            </View>
-
             <Button
               label={isSubmitting ? 'Signing in...' : 'Sign In'}
               onPress={handleSubmit(onSubmit)}
@@ -206,16 +197,6 @@ const styles = StyleSheet.create({
     fontSize: 12,
     marginLeft: 4,
     marginTop: -4,
-  },
-  forgotPasswordContainer: {
-    alignItems: 'flex-end',
-    marginTop: -8,
-    marginBottom: 8,
-  },
-  forgotPasswordText: {
-    color: Colors.primary.DEFAULT,
-    fontSize: 14,
-    fontWeight: '600',
   },
   footer: {
     flexDirection: 'row',

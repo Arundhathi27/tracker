@@ -12,8 +12,7 @@ import { CategorySelect } from '@/components/budget/CategorySelect';
 import { PaymentMethodSelect } from '@/components/transactions/PaymentMethodSelect';
 import { Colors } from '@/constants/colors';
 import { Theme } from '@/constants/theme';
-import { useMonthlyBudgetByMonth, useBudgetCategories } from '@/hooks/useBudgets';
-import { toISODate, toISOMonth } from '@/utils/date';
+import { toISODate } from '@/utils/date';
 
 const expenseSchema = z.object({
   amount: z.string().min(1, 'Amount is required').refine(
@@ -50,26 +49,12 @@ export default function CreateExpenseScreen() {
   });
 
   const txDate = watch('date');
-  const monthStr = txDate ? txDate.slice(0, 7) : toISOMonth(new Date());
-  const { data: budget } = useMonthlyBudgetByMonth(monthStr);
-  const { data: categories } = useBudgetCategories(budget?.id || '');
   
   const onSubmit = async (data: ExpenseFormValues) => {
     setError(null);
     setIsSubmitting(true);
     
-    // Validate remaining budget
-    if (categories) {
-      const category = categories.find((c: any) => c.id === data.category_id);
-      if (category) {
-        const remaining = category.allocated_amount - category.spent_amount;
-        if (Number(data.amount) > remaining) {
-          setError(`Amount exceeds remaining budget for ${category.name} (₹${remaining.toLocaleString('en-IN')})`);
-          setIsSubmitting(false);
-          return;
-        }
-      }
-    }
+
     
     try {
       console.log('--- Before calling createExpense() ---');

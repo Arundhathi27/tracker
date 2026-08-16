@@ -5,26 +5,30 @@ import {
   UpdateIncomeDto,
   IncomeFilters
 } from '@/services/incomeService';
+import { useAuthStore } from '@/store';
 
 export const INCOME_KEYS = {
-  all: ['income'] as const,
-  lists: () => [...INCOME_KEYS.all, 'list'] as const,
-  list: (filters: IncomeFilters) => [...INCOME_KEYS.lists(), filters] as const,
-  detail: (id: string) => [...INCOME_KEYS.all, 'detail', id] as const,
+  all: (userId?: string) => ['income', userId] as const,
+  lists: (userId?: string) => ['income', 'list', userId] as const,
+  list: (filters: IncomeFilters, userId?: string) => ['income', 'list', filters, userId] as const,
+  detail: (id: string, userId?: string) => ['income', 'detail', id, userId] as const,
 };
 
 export function useIncomeList(filters: IncomeFilters = {}) {
+  const { user } = useAuthStore();
   return useQuery({
-    queryKey: INCOME_KEYS.list(filters),
+    queryKey: INCOME_KEYS.list(filters, user?.id),
     queryFn: () => incomeService.getIncome(filters),
+    enabled: !!user?.id,
   });
 }
 
 export function useIncomeDetail(id: string) {
+  const { user } = useAuthStore();
   return useQuery({
-    queryKey: INCOME_KEYS.detail(id),
+    queryKey: INCOME_KEYS.detail(id, user?.id),
     queryFn: () => incomeService.getIncomeById(id),
-    enabled: !!id,
+    enabled: !!user?.id && !!id,
   });
 }
 
@@ -34,7 +38,7 @@ export function useCreateIncome() {
   return useMutation({
     mutationFn: (dto: CreateIncomeDto) => incomeService.createIncome(dto),
     onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: INCOME_KEYS.all });
+      queryClient.invalidateQueries({ queryKey: ['income'] });
     },
   });
 }
@@ -45,9 +49,8 @@ export function useUpdateIncome() {
   return useMutation({
     mutationFn: ({ id, dto }: { id: string; dto: UpdateIncomeDto }) =>
       incomeService.updateIncome(id, dto),
-    onSuccess: (_, variables) => {
-      queryClient.invalidateQueries({ queryKey: INCOME_KEYS.all });
-      queryClient.invalidateQueries({ queryKey: INCOME_KEYS.detail(variables.id) });
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['income'] });
     },
   });
 }
@@ -58,7 +61,7 @@ export function useDeleteIncome() {
   return useMutation({
     mutationFn: (id: string) => incomeService.deleteIncome(id),
     onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: INCOME_KEYS.all });
+      queryClient.invalidateQueries({ queryKey: ['income'] });
     },
   });
 }

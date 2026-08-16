@@ -50,9 +50,14 @@ class IncomeService {
   }
 
   async getIncomeById(id: string): Promise<Income> {
+    const { data: userData, error: userError } = await supabase.auth.getUser();
+    if (userError) throw userError;
+    if (!userData?.user) throw new Error('Not authenticated');
+
     const { data, error } = await (supabase as any)
       .from('income')
       .select('*')
+      .eq('user_id', userData.user.id)
       .eq('id', id)
       .single();
 

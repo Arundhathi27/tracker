@@ -3,8 +3,13 @@ import { SavingsGoal } from '@/types';
 
 export const savingsGoalService = {
   async getGoals(): Promise<SavingsGoal[]> {
+    const { data: userData, error: userError } = await supabase.auth.getUser();
+    if (userError) throw userError;
+    if (!userData?.user) throw new Error('Not authenticated');
+
     const { data, error } = await (supabase.from('savings_goals') as any)
       .select('*')
+      .eq('user_id', userData.user.id)
       .order('created_at', { ascending: false });
 
     if (error) throw error;
@@ -12,8 +17,13 @@ export const savingsGoalService = {
   },
 
   async getGoal(id: string): Promise<SavingsGoal | null> {
+    const { data: userData, error: userError } = await supabase.auth.getUser();
+    if (userError) throw userError;
+    if (!userData?.user) throw new Error('Not authenticated');
+
     const { data, error } = await (supabase.from('savings_goals') as any)
       .select('*')
+      .eq('user_id', userData.user.id)
       .eq('id', id)
       .single();
 
@@ -23,7 +33,7 @@ export const savingsGoalService = {
 
   async createGoal(dto: Partial<SavingsGoal>): Promise<SavingsGoal> {
     const { data: userData } = await supabase.auth.getUser();
-    if (!userData.user) throw new Error('Not authenticated');
+    if (!userData?.user) throw new Error('Not authenticated');
 
     const { data, error } = await (supabase.from('savings_goals') as any)
       .insert({

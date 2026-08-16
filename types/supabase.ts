@@ -142,6 +142,57 @@ export type Database = {
           updated_at?: string;
         };
       };
+      fixed_expenses: {
+        Row: {
+          id: string;
+          user_id: string;
+          name: string;
+          category_name: string;
+          keyword: string;
+          created_at: string;
+          updated_at: string;
+        };
+        Insert: {
+          id?: string;
+          user_id: string;
+          name: string;
+          category_name: string;
+          keyword?: string;
+          created_at?: string;
+          updated_at?: string;
+        };
+        Update: {
+          name?: string;
+          category_name?: string;
+          keyword?: string;
+          updated_at?: string;
+        };
+      };
+      fixed_expense_overrides: {
+        Row: {
+          id: string;
+          user_id: string;
+          fixed_expense_id: string;
+          year: number;
+          month: number;
+          created_at: string;
+          updated_at: string;
+        };
+        Insert: {
+          id?: string;
+          user_id: string;
+          fixed_expense_id: string;
+          year: number;
+          month: number;
+          created_at?: string;
+          updated_at?: string;
+        };
+        Update: {
+          year?: number;
+          month?: number;
+          updated_at?: string;
+        };
+      };
     };
     Views: Record<string, never>;
     Functions: Record<string, never>;

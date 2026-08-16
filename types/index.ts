@@ -134,6 +134,26 @@ export interface SavingsGoal {
   updated_at: string;
 }
 
+export interface FixedExpense {
+  id: string;
+  user_id: string;
+  name: string;
+  category_name: string;
+  keyword: string;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface FixedExpenseOverride {
+  id: string;
+  user_id: string;
+  fixed_expense_id: string;
+  year: number;
+  month: number; // 1-12
+  created_at: string;
+  updated_at: string;
+}
+
 // ─── UI Types ────────────────────────────────────────────────────────────
 
 export type ButtonVariant = 'primary' | 'secondary' | 'outline' | 'ghost' | 'danger';

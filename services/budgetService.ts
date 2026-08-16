@@ -23,9 +23,13 @@ class BudgetService extends BaseService {
 
   async getMonthlyBudgets(): Promise<MonthlyBudget[]> {
     try {
+      const { data: userData, error: userError } = await this.supabase.auth.getUser();
+      if (userError) throw userError;
+
       const { data, error } = await this.supabase
         .from('monthly_budgets')
         .select('*, budget_categories(*)')
+        .eq('user_id', userData.user.id)
         .order('month', { ascending: false });
 
       if (error) throw error;
@@ -37,9 +41,13 @@ class BudgetService extends BaseService {
 
   async getMonthlyBudgetById(id: string): Promise<MonthlyBudget> {
     try {
+      const { data: userData, error: userError } = await this.supabase.auth.getUser();
+      if (userError) throw userError;
+
       const { data, error } = await this.supabase
         .from('monthly_budgets')
         .select('*, budget_categories(*)')
+        .eq('user_id', userData.user.id)
         .eq('id', id)
         .single();
 
@@ -123,9 +131,13 @@ class BudgetService extends BaseService {
 
   async getBudgetCategories(monthlyBudgetId: string): Promise<BudgetCategory[]> {
     try {
+      const { data: userData, error: userError } = await this.supabase.auth.getUser();
+      if (userError) throw userError;
+
       const { data, error } = await this.supabase
         .from('budget_categories')
         .select('*')
+        .eq('user_id', userData.user.id)
         .eq('monthly_budget_id', monthlyBudgetId)
         .order('created_at', { ascending: false });
 
@@ -143,9 +155,13 @@ class BudgetService extends BaseService {
 
   async getBudgetCategoryById(id: string): Promise<BudgetCategory> {
     try {
+      const { data: userData, error: userError } = await this.supabase.auth.getUser();
+      if (userError) throw userError;
+
       const { data, error } = await this.supabase
         .from('budget_categories')
         .select('*')
+        .eq('user_id', userData.user.id)
         .eq('id', id)
         .single();
 

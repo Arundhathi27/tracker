@@ -13,8 +13,7 @@ import { PaymentMethodSelect } from '@/components/transactions/PaymentMethodSele
 import { Colors } from '@/constants/colors';
 import { Theme } from '@/constants/theme';
 import { Trash2 } from 'lucide-react-native';
-import { useBudgetCategories, useMonthlyBudgetByMonth } from '@/hooks/useBudgets';
-import { toISODate, toISOMonth } from '@/utils/date';
+import { toISODate } from '@/utils/date';
 
 const expenseSchema = z.object({
   amount: z.string().min(1, 'Amount is required').refine(
@@ -54,9 +53,6 @@ export default function EditExpenseScreen() {
 
   const [error, setError] = React.useState<string | null>(null);
   const txDate = watch('date');
-  const monthStr = txDate ? txDate.slice(0, 7) : toISOMonth(new Date());
-  const { data: budget } = useMonthlyBudgetByMonth(monthStr);
-  const { data: categories } = useBudgetCategories(budget?.id || '');
 
   useEffect(() => {
     if (transaction) {
@@ -73,19 +69,7 @@ export default function EditExpenseScreen() {
   const onSubmit = async (data: ExpenseFormValues) => {
     setError(null);
     
-    // Validate remaining budget
-    if (categories && transaction) {
-      const category = categories.find((c: any) => c.id === data.category_id);
-      if (category) {
-        // Add back the previous amount if the category is the same
-        const oldAmount = data.category_id === transaction.category_id ? transaction.amount : 0;
-        const remaining = category.allocated_amount - category.spent_amount + oldAmount;
-        if (Number(data.amount) > remaining) {
-          setError(`Amount exceeds remaining budget for ${category.name} (₹${remaining.toLocaleString('en-IN')})`);
-          return;
-        }
-      }
-    }
+
 
     try {
       await updateTransaction({

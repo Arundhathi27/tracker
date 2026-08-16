@@ -5,6 +5,8 @@ import { Theme } from '@/constants/theme';
 import { MonthlyBudget } from '@/types';
 import { formatCurrency } from '@/utils/formatters';
 
+import { getBudgetStatus } from '@/utils/budgetStatus';
+
 interface BudgetCardProps {
   budget: MonthlyBudget;
   onPress?: (budget: MonthlyBudget) => void;
@@ -14,15 +16,12 @@ export const BudgetCard: React.FC<BudgetCardProps> = ({ budget, onPress }) => {
   const { month, total_amount, budget_categories } = budget;
   
   const spent = budget_categories?.reduce((acc, cat) => acc + cat.spent, 0) || 0;
+  const status = getBudgetStatus(total_amount, spent);
   const percentage = Math.min((spent / total_amount) * 100, 100);
-  const remaining = total_amount - spent;
-  
-  const isOverBudget = spent >= total_amount;
-  const isNearLimit = percentage >= 85 && !isOverBudget;
   
   let progressColor: string = Colors.primary.DEFAULT;
-  if (isOverBudget) progressColor = Colors.danger.DEFAULT;
-  else if (isNearLimit) progressColor = Colors.accent.DEFAULT;
+  if (status.status === 'over') progressColor = Colors.danger.DEFAULT;
+  else if (status.status === 'near' || status.status === 'exact') progressColor = Colors.warning.DEFAULT;
 
   return (
     <TouchableOpacity 
@@ -44,12 +43,12 @@ export const BudgetCard: React.FC<BudgetCardProps> = ({ budget, onPress }) => {
           <Text style={styles.spentAmount}>{formatCurrency(spent)}</Text>
         </View>
         <View style={styles.remainingContainer}>
-          <Text style={styles.remainingLabel}>Remaining</Text>
+          <Text style={styles.remainingLabel}>Status</Text>
           <Text style={[
             styles.remainingAmount, 
-            isOverBudget && { color: Colors.danger.DEFAULT }
+            { color: status.color }
           ]}>
-            {formatCurrency(Math.max(remaining, 0))}
+            {status.label}
           </Text>
         </View>
       </View>
@@ -64,7 +63,7 @@ export const BudgetCard: React.FC<BudgetCardProps> = ({ budget, onPress }) => {
       </View>
       
       <View style={styles.progressFooter}>
-        <Text style={styles.percentageText}>{percentage.toFixed(0)}% used</Text>
+        <Text style={styles.percentageText}>{((spent / total_amount) * 100).toFixed(0)}% used</Text>
         <Text style={styles.totalText}>of {formatCurrency(total_amount)}</Text>
       </View>
     </TouchableOpacity>

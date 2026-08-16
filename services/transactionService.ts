@@ -27,9 +27,13 @@ export type TransactionFilters = {
 class TransactionService extends BaseService {
   async getTransactions(filters: TransactionFilters = {}): Promise<Transaction[]> {
     try {
+      const { data: userData, error: userError } = await this.supabase.auth.getUser();
+      if (userError) throw userError;
+
       let query = this.supabase
         .from('transactions')
-        .select('*, category:budget_categories(*), payment_method:payment_methods(*)');
+        .select('*, category:budget_categories(*), payment_method:payment_methods(*)')
+        .eq('user_id', userData.user.id);
 
       if (filters.dateStart) {
         query = query.gte('date', filters.dateStart);
@@ -71,9 +75,13 @@ class TransactionService extends BaseService {
 
   async getTransactionById(id: string): Promise<Transaction> {
     try {
+      const { data: userData, error: userError } = await this.supabase.auth.getUser();
+      if (userError) throw userError;
+
       const { data, error } = await this.supabase
         .from('transactions')
         .select('*, category:budget_categories(*), payment_method:payment_methods(*)')
+        .eq('user_id', userData.user.id)
         .eq('id', id)
         .single();
 

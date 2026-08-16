@@ -6,36 +6,41 @@ import {
   CreateBudgetCategoryDto,
   UpdateBudgetCategoryDto
 } from '@/services/budgetService';
+import { useAuthStore } from '@/store';
 
 export const BUDGET_KEYS = {
-  monthlyBudgets: ['monthly_budgets'] as const,
-  monthlyBudgetDetail: (id: string) => [...BUDGET_KEYS.monthlyBudgets, id] as const,
-  monthlyBudgetByMonth: (month: string) => [...BUDGET_KEYS.monthlyBudgets, 'month', month] as const,
-  budgetCategories: (monthlyBudgetId: string) => ['budget_categories', monthlyBudgetId] as const,
+  monthlyBudgets: (userId?: string) => ['monthly_budgets', userId] as const,
+  monthlyBudgetDetail: (id: string, userId?: string) => ['monthly_budgets', 'detail', id, userId] as const,
+  monthlyBudgetByMonth: (month: string, userId?: string) => ['monthly_budgets', 'month', month, userId] as const,
+  budgetCategories: (monthlyBudgetId: string, userId?: string) => ['budget_categories', monthlyBudgetId, userId] as const,
 };
 
 // ─── Monthly Budgets ────────────────────────────────────────────────────────
 
 export function useMonthlyBudgets() {
+  const { user } = useAuthStore();
   return useQuery({
-    queryKey: BUDGET_KEYS.monthlyBudgets,
+    queryKey: BUDGET_KEYS.monthlyBudgets(user?.id),
     queryFn: () => budgetService.getMonthlyBudgets(),
+    enabled: !!user?.id,
   });
 }
 
 export function useMonthlyBudget(id: string) {
+  const { user } = useAuthStore();
   return useQuery({
-    queryKey: BUDGET_KEYS.monthlyBudgetDetail(id),
+    queryKey: BUDGET_KEYS.monthlyBudgetDetail(id, user?.id),
     queryFn: () => budgetService.getMonthlyBudgetById(id),
-    enabled: !!id,
+    enabled: !!user?.id && !!id,
   });
 }
 
 export function useMonthlyBudgetByMonth(month: string) {
+  const { user } = useAuthStore();
   return useQuery({
-    queryKey: BUDGET_KEYS.monthlyBudgetByMonth(month),
+    queryKey: BUDGET_KEYS.monthlyBudgetByMonth(month, user?.id),
     queryFn: () => budgetService.getMonthlyBudgetByMonth(month),
-    enabled: !!month,
+    enabled: !!user?.id && !!month,
   });
 }
 
@@ -45,8 +50,7 @@ export function useCreateMonthlyBudget() {
   return useMutation({
     mutationFn: (dto: CreateMonthlyBudgetDto) => budgetService.createMonthlyBudget(dto),
     onSuccess: (_, variables) => {
-      queryClient.invalidateQueries({ queryKey: BUDGET_KEYS.monthlyBudgets });
-      queryClient.invalidateQueries({ queryKey: BUDGET_KEYS.monthlyBudgetByMonth(variables.month) });
+      queryClient.invalidateQueries({ queryKey: ['monthly_budgets'] });
     },
   });
 }
@@ -57,9 +61,8 @@ export function useUpdateMonthlyBudget() {
   return useMutation({
     mutationFn: ({ id, dto }: { id: string; dto: UpdateMonthlyBudgetDto }) =>
       budgetService.updateMonthlyBudget(id, dto),
-    onSuccess: (_, variables) => {
-      queryClient.invalidateQueries({ queryKey: BUDGET_KEYS.monthlyBudgets });
-      queryClient.invalidateQueries({ queryKey: BUDGET_KEYS.monthlyBudgetDetail(variables.id) });
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['monthly_budgets'] });
     },
   });
 }
@@ -70,7 +73,7 @@ export function useDeleteMonthlyBudget() {
   return useMutation({
     mutationFn: (id: string) => budgetService.deleteMonthlyBudget(id),
     onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: BUDGET_KEYS.monthlyBudgets });
+      queryClient.invalidateQueries({ queryKey: ['monthly_budgets'] });
     },
   });
 }
@@ -78,10 +81,11 @@ export function useDeleteMonthlyBudget() {
 // ─── Budget Categories ──────────────────────────────────────────────────────
 
 export function useBudgetCategories(monthlyBudgetId: string) {
+  const { user } = useAuthStore();
   return useQuery({
-    queryKey: BUDGET_KEYS.budgetCategories(monthlyBudgetId),
+    queryKey: BUDGET_KEYS.budgetCategories(monthlyBudgetId, user?.id),
     queryFn: () => budgetService.getBudgetCategories(monthlyBudgetId),
-    enabled: !!monthlyBudgetId,
+    enabled: !!user?.id && !!monthlyBudgetId,
   });
 }
 
@@ -90,9 +94,9 @@ export function useCreateBudgetCategory() {
 
   return useMutation({
     mutationFn: (dto: CreateBudgetCategoryDto) => budgetService.createBudgetCategory(dto),
-    onSuccess: (_, variables) => {
-      queryClient.invalidateQueries({ queryKey: BUDGET_KEYS.budgetCategories(variables.monthly_budget_id) });
-      queryClient.invalidateQueries({ queryKey: BUDGET_KEYS.monthlyBudgets });
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['budget_categories'] });
+      queryClient.invalidateQueries({ queryKey: ['monthly_budgets'] });
     },
   });
 }
@@ -101,11 +105,11 @@ export function useUpdateBudgetCategory() {
   const queryClient = useQueryClient();
 
   return useMutation({
-    mutationFn: ({ id, dto, monthlyBudgetId }: { id: string; dto: UpdateBudgetCategoryDto, monthlyBudgetId: string }) =>
+    mutationFn: ({ id, dto }: { id: string; dto: UpdateBudgetCategoryDto; monthlyBudgetId: string }) =>
       budgetService.updateBudgetCategory(id, dto),
-    onSuccess: (_, variables) => {
-      queryClient.invalidateQueries({ queryKey: BUDGET_KEYS.budgetCategories(variables.monthlyBudgetId) });
-      queryClient.invalidateQueries({ queryKey: BUDGET_KEYS.monthlyBudgets });
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['budget_categories'] });
+      queryClient.invalidateQueries({ queryKey: ['monthly_budgets'] });
     },
   });
 }
@@ -114,10 +118,10 @@ export function useDeleteBudgetCategory() {
   const queryClient = useQueryClient();
 
   return useMutation({
-    mutationFn: ({ id, monthlyBudgetId }: { id: string, monthlyBudgetId: string }) => budgetService.deleteBudgetCategory(id),
-    onSuccess: (_, variables) => {
-      queryClient.invalidateQueries({ queryKey: BUDGET_KEYS.budgetCategories(variables.monthlyBudgetId) });
-      queryClient.invalidateQueries({ queryKey: BUDGET_KEYS.monthlyBudgets });
+    mutationFn: ({ id }: { id: string; monthlyBudgetId: string }) => budgetService.deleteBudgetCategory(id),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['budget_categories'] });
+      queryClient.invalidateQueries({ queryKey: ['monthly_budgets'] });
     },
   });
 }

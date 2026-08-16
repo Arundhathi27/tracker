@@ -5,28 +5,30 @@ import {
   UpdateTransactionDto,
   TransactionFilters
 } from '@/services/transactionService';
-import { BUDGET_KEYS } from './useBudgets';
-import { PAYMENT_METHODS_KEYS } from './usePaymentMethods';
+import { useAuthStore } from '@/store';
 
 export const TRANSACTION_KEYS = {
-  all: ['transactions'] as const,
-  lists: () => [...TRANSACTION_KEYS.all, 'list'] as const,
-  list: (filters: TransactionFilters) => [...TRANSACTION_KEYS.lists(), filters] as const,
-  detail: (id: string) => [...TRANSACTION_KEYS.all, 'detail', id] as const,
+  all: (userId?: string) => ['transactions', userId] as const,
+  lists: (userId?: string) => ['transactions', 'list', userId] as const,
+  list: (filters: TransactionFilters, userId?: string) => ['transactions', 'list', filters, userId] as const,
+  detail: (id: string, userId?: string) => ['transactions', 'detail', id, userId] as const,
 };
 
 export function useTransactions(filters: TransactionFilters = {}) {
+  const { user } = useAuthStore();
   return useQuery({
-    queryKey: TRANSACTION_KEYS.list(filters),
+    queryKey: TRANSACTION_KEYS.list(filters, user?.id),
     queryFn: () => transactionService.getTransactions(filters),
+    enabled: !!user?.id,
   });
 }
 
 export function useTransaction(id: string) {
+  const { user } = useAuthStore();
   return useQuery({
-    queryKey: TRANSACTION_KEYS.detail(id),
+    queryKey: TRANSACTION_KEYS.detail(id, user?.id),
     queryFn: () => transactionService.getTransactionById(id),
-    enabled: !!id,
+    enabled: !!user?.id && !!id,
   });
 }
 
@@ -36,20 +38,14 @@ export function useCreateTransaction() {
   return useMutation({
     mutationFn: async (dto: CreateTransactionDto) => {
       const res = await transactionService.createTransaction(dto);
-      console.log('--- After Supabase insert ---');
       return res;
     },
-    onSuccess: (_, variables) => {
-      console.log('--- Inside onSuccess() ---');
-      queryClient.invalidateQueries({ queryKey: TRANSACTION_KEYS.all });
-      queryClient.invalidateQueries({ queryKey: BUDGET_KEYS.monthlyBudgets });
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['transactions'] });
+      queryClient.invalidateQueries({ queryKey: ['monthly_budgets'] });
       queryClient.invalidateQueries({ queryKey: ['budget_categories'] });
-      queryClient.invalidateQueries({ queryKey: PAYMENT_METHODS_KEYS.all });
-      console.log('--- After invalidateQueries() ---');
+      queryClient.invalidateQueries({ queryKey: ['payment_methods'] });
     },
-    onError: (err) => {
-      console.log('--- Inside onError() ---', err);
-    }
   });
 }
 
@@ -59,12 +55,11 @@ export function useUpdateTransaction() {
   return useMutation({
     mutationFn: ({ id, dto }: { id: string; dto: UpdateTransactionDto }) =>
       transactionService.updateTransaction(id, dto),
-    onSuccess: (_, variables) => {
-      queryClient.invalidateQueries({ queryKey: TRANSACTION_KEYS.all });
-      queryClient.invalidateQueries({ queryKey: TRANSACTION_KEYS.detail(variables.id) });
-      queryClient.invalidateQueries({ queryKey: BUDGET_KEYS.monthlyBudgets });
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['transactions'] });
+      queryClient.invalidateQueries({ queryKey: ['monthly_budgets'] });
       queryClient.invalidateQueries({ queryKey: ['budget_categories'] });
-      queryClient.invalidateQueries({ queryKey: PAYMENT_METHODS_KEYS.all });
+      queryClient.invalidateQueries({ queryKey: ['payment_methods'] });
     },
   });
 }
@@ -75,10 +70,10 @@ export function useDeleteTransaction() {
   return useMutation({
     mutationFn: (id: string) => transactionService.deleteTransaction(id),
     onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: TRANSACTION_KEYS.all });
-      queryClient.invalidateQueries({ queryKey: BUDGET_KEYS.monthlyBudgets });
+      queryClient.invalidateQueries({ queryKey: ['transactions'] });
+      queryClient.invalidateQueries({ queryKey: ['monthly_budgets'] });
       queryClient.invalidateQueries({ queryKey: ['budget_categories'] });
-      queryClient.invalidateQueries({ queryKey: PAYMENT_METHODS_KEYS.all });
+      queryClient.invalidateQueries({ queryKey: ['payment_methods'] });
     },
   });
 }

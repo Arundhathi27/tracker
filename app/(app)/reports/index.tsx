@@ -1,8 +1,9 @@
-import React, { useMemo, useState } from 'react';
+import React, { useMemo, useState, useCallback } from 'react';
 import {
   View, Text, StyleSheet, ScrollView, Dimensions,
   ActivityIndicator, TouchableOpacity
 } from 'react-native';
+import { useFocusEffect } from 'expo-router';
 import { PieChart, LineChart } from 'react-native-chart-kit';
 import {
   ShoppingBag, Coffee, Car, Zap, Utensils, Smartphone,
@@ -17,6 +18,7 @@ import { getIncomeSourceColor } from '@/components/income/IncomeSourceSelect';
 import { Colors } from '@/constants/colors';
 import { Theme } from '@/constants/theme';
 import { formatCurrency } from '@/utils/formatters';
+import { generateSpendingInsights } from '@/utils/spendingInsights';
 import { BudgetCategory } from '@/types';
 
 const screenWidth = Dimensions.get('window').width - 40; // 20px padding each side
@@ -88,27 +90,56 @@ export default function ReportsScreen() {
   
   const { dateStart, dateEnd } = getDateRange(year, month);
 
+  // Previous month calculation with year boundary support (e.g. Jan 2027 vs Dec 2026)
+  const prevYear = month === 0 ? year - 1 : year;
+  const prevMonth = month === 0 ? 11 : month - 1;
+  const { dateStart: prevDateStart, dateEnd: prevDateEnd } = getDateRange(prevYear, prevMonth);
+  const prevMonthLabel = new Date(prevYear, prevMonth, 1).toLocaleString('default', { month: 'long' });
+
   // Data hooks
-  const { data: budget, isLoading: loadingBudget } = useMonthlyBudgetByMonth(monthKey);
-  const { data: categories, isLoading: loadingCats } = useBudgetCategories(budget?.id || '');
-  const { data: expenses, isLoading: loadingExpenses } = useTransactions({
+  const { data: budget, isLoading: loadingBudget, refetch: refetchBudget } = useMonthlyBudgetByMonth(monthKey);
+  const { data: categories, isLoading: loadingCats, refetch: refetchCats } = useBudgetCategories(budget?.id || '');
+  const { data: expenses, isLoading: loadingExpenses, refetch: refetchExpenses } = useTransactions({
     type: 'expense',
     dateStart,
     dateEnd,
     sortBy: 'date',
     sortOrder: 'asc',
   });
-  const { data: income, isLoading: loadingIncome } = useIncomeList({
+  const { data: prevExpenses, isLoading: loadingPrevExpenses, refetch: refetchPrevExpenses } = useTransactions({
+    type: 'expense',
+    dateStart: prevDateStart,
+    dateEnd: prevDateEnd,
+  });
+  const { data: income, isLoading: loadingIncome, refetch: refetchIncome } = useIncomeList({
     dateStart,
     dateEnd,
   });
 
-  const isLoading = loadingBudget || loadingCats || loadingExpenses || loadingIncome;
+  const handleRefresh = useCallback(() => {
+    refetchBudget();
+    refetchCats();
+    refetchExpenses();
+    refetchPrevExpenses();
+    refetchIncome();
+  }, [refetchBudget, refetchCats, refetchExpenses, refetchPrevExpenses, refetchIncome]);
+
+  useFocusEffect(
+    useCallback(() => {
+      handleRefresh();
+    }, [handleRefresh])
+  );
+
+  const isLoading = loadingBudget || loadingCats || loadingExpenses || loadingPrevExpenses || loadingIncome;
 
   // ── Analytics computations ────────────────────────────────────────────────
   const analytics = useMemo(() => {
     const totalBudget = budget?.total_amount || 0;
-    const totalSpent = categories?.reduce((s, c) => s + c.spent_amount, 0) || 0;
+    const totalSpent = (expenses || []).reduce((s, tx) => s + tx.amount, 0);
+    const prevTotalSpent = (prevExpenses || []).reduce((s, tx) => s + tx.amount, 0);
+    const hasPrevData = (prevExpenses || []).length > 0;
+    const monthDiff = totalSpent - prevTotalSpent;
+    const absMonthDiff = Math.abs(monthDiff);
     const remaining = totalBudget - totalSpent;
     const totalTx = expenses?.length || 0;
     const totalCats = categories?.length || 0;
@@ -131,16 +162,19 @@ export default function ReportsScreen() {
       legendFontSize: 11,
     }));
 
-    // Pie chart: spending per category (only categories with spending)
-    const catTotals: Record<string, { name: string; spent: number; color: string; icon: string }> = {};
+    // Spending per category (sorted by highest spending first)
+    const catTotals: Record<string, { id: string; name: string; spent: number; color: string; icon: string }> = {};
     (expenses || []).forEach(tx => {
-      if (!tx.category_id) return;
+      const catId = tx.category_id || 'uncategorized';
       const cat = categories?.find(c => c.id === tx.category_id);
-      if (!cat) return;
-      if (!catTotals[cat.id]) {
-        catTotals[cat.id] = { name: cat.name, spent: 0, color: cat.color || Colors.primary.DEFAULT, icon: cat.icon || 'HelpCircle' };
+      const catName = cat?.name || tx.category?.name || 'Uncategorized';
+      const catColor = cat?.color || tx.category?.color || Colors.primary.DEFAULT;
+      const catIcon = cat?.icon || tx.category?.icon || 'HelpCircle';
+
+      if (!catTotals[catId]) {
+        catTotals[catId] = { id: catId, name: catName, spent: 0, color: catColor, icon: catIcon };
       }
-      catTotals[cat.id].spent += tx.amount;
+      catTotals[catId].spent += tx.amount;
     });
 
     const catTotalArr = Object.values(catTotals).sort((a, b) => b.spent - a.spent);
@@ -148,7 +182,7 @@ export default function ReportsScreen() {
     const pieData = catTotalArr.map((c, i) => ({
       name: c.name,
       amount: c.spent,
-      color: PIE_COLORS[i % PIE_COLORS.length],
+      color: c.color || PIE_COLORS[i % PIE_COLORS.length],
       legendFontColor: Colors.text.secondary,
       legendFontSize: 11,
     }));
@@ -215,37 +249,29 @@ export default function ReportsScreen() {
     // Top spending category
     const topCat = catTotalArr[0] || null;
 
-    // Insights
-    const insights: string[] = [];
-    if (topCat) {
-      insights.push(`You spent the most on ${topCat.name} this month (${formatCurrency(topCat.spent)}).`);
-    }
-    (categories || []).forEach(c => {
-      const pct = c.allocated_amount > 0 ? Math.round((c.spent_amount / c.allocated_amount) * 100) : 0;
-      if (pct >= 90) {
-        insights.push(`Your ${c.name} budget is ${pct}% used.`);
-      }
-    });
-    if (remaining > 0) {
-      insights.push(`You have ${formatCurrency(remaining)} remaining budget this month.`);
-    } else if (remaining < 0) {
-      insights.push(`You are over budget by ${formatCurrency(-remaining)} this month.`);
-    }
-    if (totalTx === 0) {
-      insights.push('No expenses recorded this month yet.');
-    }
-
-    if (totalIncome > 0) {
-      insights.push(`You have recorded ${formatCurrency(totalIncome)} in income this month.`);
-    }
+    // Structured spending insights
+    const structuredCategories = (categories || []).map(c => ({
+      name: c.name,
+      allocated_amount: c.allocated_amount,
+      spent_amount: c.spent_amount,
+    }));
+    const spendingInsights = generateSpendingInsights(
+      totalBudget,
+      structuredCategories,
+      totalSpent,
+      totalTx > 0,
+      prevTotalSpent,
+      hasPrevData
+    );
 
     return {
-      totalBudget, totalSpent, remaining, totalTx, totalCats, totalIncome,
-      pieData, incomePieData, lineData, catTotalArr, pmTotalArr, topCat, insights, daysInMonth,
+      totalBudget, totalSpent, prevTotalSpent, hasPrevData, monthDiff, absMonthDiff, prevMonthLabel,
+      remaining, totalTx, totalCats, totalIncome,
+      pieData, incomePieData, lineData, catTotalArr, pmTotalArr, topCat, spendingInsights, daysInMonth,
       hasExpenses: totalTx > 0,
       hasIncome: totalIncome > 0,
     };
-  }, [budget, categories, expenses, income, month, year]);
+  }, [budget, categories, expenses, prevExpenses, income, month, year, prevMonthLabel]);
 
   const chartConfig = {
     backgroundGradientFrom: Colors.surface.DEFAULT,
@@ -301,6 +327,58 @@ export default function ReportsScreen() {
                   <Text style={[styles.summaryValue, { color: item.color }]}>{item.value}</Text>
                 </View>
               ))}
+            </View>
+
+            {/* ── Monthly Comparison Card ── */}
+            <View style={styles.card}>
+              <View style={styles.comparisonHeader}>
+                <TrendingUp size={20} color={Colors.primary.DEFAULT} />
+                <Text style={styles.cardTitle}>Monthly Comparison</Text>
+              </View>
+
+              {!analytics.hasPrevData ? (
+                <Text style={styles.cardSubtitle}>
+                  No spending data recorded for {analytics.prevMonthLabel} to compare.
+                </Text>
+              ) : (
+                <View style={styles.comparisonBody}>
+                  <View style={styles.comparisonGrid}>
+                    <View style={styles.comparisonCol}>
+                      <Text style={styles.comparisonLabel}>{analytics.prevMonthLabel}</Text>
+                      <Text style={styles.comparisonVal}>{formatCurrency(analytics.prevTotalSpent)}</Text>
+                    </View>
+                    <View style={styles.comparisonCol}>
+                      <Text style={styles.comparisonLabel}>{monthLabel.split(' ')[0]}</Text>
+                      <Text style={styles.comparisonVal}>{formatCurrency(analytics.totalSpent)}</Text>
+                    </View>
+                    <View style={styles.comparisonCol}>
+                      <Text style={styles.comparisonLabel}>Difference</Text>
+                      <Text style={[
+                        styles.comparisonVal,
+                        analytics.monthDiff > 0 ? { color: Colors.danger.DEFAULT } : analytics.monthDiff < 0 ? { color: Colors.success.DEFAULT } : { color: Colors.text.primary }
+                      ]}>
+                        {analytics.monthDiff > 0 ? `+${formatCurrency(analytics.monthDiff)}` : analytics.monthDiff < 0 ? `-${formatCurrency(analytics.absMonthDiff)}` : '₹0'}
+                      </Text>
+                    </View>
+                  </View>
+
+                  <View style={[
+                    styles.comparisonBanner,
+                    analytics.monthDiff > 0 ? { backgroundColor: `${Colors.danger.DEFAULT}15` } : analytics.monthDiff < 0 ? { backgroundColor: `${Colors.success.DEFAULT}15` } : { backgroundColor: `${Colors.primary.DEFAULT}15` }
+                  ]}>
+                    <Text style={[
+                      styles.comparisonBannerText,
+                      analytics.monthDiff > 0 ? { color: Colors.danger.DEFAULT } : analytics.monthDiff < 0 ? { color: Colors.success.DEFAULT } : { color: Colors.primary.DEFAULT }
+                    ]}>
+                      {analytics.monthDiff > 0 
+                        ? `You spent ₹${analytics.absMonthDiff.toLocaleString('en-IN')} more than last month.`
+                        : analytics.monthDiff < 0
+                        ? `You spent ₹${analytics.absMonthDiff.toLocaleString('en-IN')} less than last month.`
+                        : `You spent the exact same amount as last month.`}
+                    </Text>
+                  </View>
+                </View>
+              )}
             </View>
 
             {!analytics.hasExpenses ? (
@@ -439,19 +517,20 @@ export default function ReportsScreen() {
               </>
             )}
 
-            {/* ── Category Breakdown (always shown if budget exists) ── */}
-            {budget && categories && categories.length > 0 && (
+            {/* ── Category Breakdown ("Where Did My Money Go?") ── */}
+            {analytics.catTotalArr && analytics.catTotalArr.length > 0 && (
               <View style={styles.card}>
-                <Text style={styles.cardTitle}>Category Breakdown</Text>
+                <View style={{ marginBottom: 12 }}>
+                  <Text style={styles.cardTitle}>Where Did My Money Go?</Text>
+                  <Text style={styles.cardSubtitle}>Category breakdown by highest spending</Text>
+                </View>
                 <View style={styles.catBreakdownList}>
-                  {categories.map((cat: BudgetCategory) => {
+                  {analytics.catTotalArr.map((cat) => {
                     const IconComp = ICON_MAP[cat.icon] || HelpCircle;
                     const color = cat.color || Colors.primary.DEFAULT;
-                    const pct = cat.allocated_amount > 0
-                      ? Math.round((cat.spent_amount / cat.allocated_amount) * 100) : 0;
-                    const remaining = cat.allocated_amount - cat.spent_amount;
-                    const progress = cat.allocated_amount > 0
-                      ? cat.spent_amount / cat.allocated_amount : 0;
+                    const pct = analytics.totalSpent > 0
+                      ? Math.round((cat.spent / analytics.totalSpent) * 100) : 0;
+                    const progress = analytics.totalSpent > 0 ? cat.spent / analytics.totalSpent : 0;
 
                     return (
                       <View key={cat.id} style={styles.catBreakdownRow}>
@@ -461,21 +540,12 @@ export default function ReportsScreen() {
                         <View style={styles.catBreakdownBody}>
                           <View style={styles.catBreakdownTop}>
                             <Text style={styles.catBreakdownName}>{cat.name}</Text>
-                            <Text style={[styles.catBreakdownPct,
-                              pct >= 100 ? { color: Colors.danger.DEFAULT } :
-                              pct >= 80 ? { color: Colors.warning.DEFAULT } : {}
-                            ]}>{pct}%</Text>
+                            <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
+                              <Text style={styles.catBreakdownAmt}>{formatCurrency(cat.spent)}</Text>
+                              <Text style={styles.catBreakdownPct}>{pct}%</Text>
+                            </View>
                           </View>
                           <ProgressBar progress={progress} color={color} />
-                          <View style={styles.catBreakdownBottom}>
-                            <Text style={styles.catMeta}>Allocated {formatCurrency(cat.allocated_amount)}</Text>
-                            <Text style={styles.catMeta}>Spent {formatCurrency(cat.spent_amount)}</Text>
-                            <Text style={[styles.catMeta,
-                              remaining < 0 ? { color: Colors.danger.DEFAULT } : { color: Colors.success.DEFAULT }
-                            ]}>
-                              {remaining >= 0 ? `Left ${formatCurrency(remaining)}` : `Over ${formatCurrency(-remaining)}`}
-                            </Text>
-                          </View>
                         </View>
                       </View>
                     );
@@ -520,18 +590,18 @@ export default function ReportsScreen() {
               </View>
             )}
 
-            {/* ── Insights ── */}
-            {analytics.insights.length > 0 && (
+            {/* ── Spending Insights ── */}
+            {analytics.spendingInsights && analytics.spendingInsights.length > 0 && (
               <View style={styles.card}>
                 <View style={styles.insightHeader}>
                   <Lightbulb size={18} color={Colors.accent.DEFAULT} />
-                  <Text style={styles.cardTitle}>Insights</Text>
+                  <Text style={styles.cardTitle}>Spending Insights</Text>
                 </View>
                 <View style={styles.insightsList}>
-                  {analytics.insights.map((insight, i) => (
-                    <View key={i} style={styles.insightRow}>
-                      <View style={styles.insightBullet} />
-                      <Text style={styles.insightText}>{insight}</Text>
+                  {analytics.spendingInsights.map((insight) => (
+                    <View key={insight.id} style={styles.insightRow}>
+                      <Text style={{ fontSize: 16 }}>{insight.icon}</Text>
+                      <Text style={styles.insightText}>{insight.text}</Text>
                     </View>
                   ))}
                 </View>
@@ -743,6 +813,11 @@ const styles = StyleSheet.create({
     fontWeight: '600',
     color: Colors.text.primary,
   },
+  catBreakdownAmt: {
+    fontSize: 13,
+    fontWeight: '700',
+    color: Colors.text.primary,
+  },
   catBreakdownPct: {
     fontSize: 13,
     fontWeight: '700',
@@ -806,6 +881,49 @@ const styles = StyleSheet.create({
   emptySubtitle: {
     fontSize: 14,
     color: Colors.text.tertiary,
+    textAlign: 'center',
+  },
+  // Comparison Card
+  comparisonHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+    marginBottom: 12,
+  },
+  comparisonBody: {
+    gap: 12,
+  },
+  comparisonGrid: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    backgroundColor: Colors.background.DEFAULT,
+    borderRadius: Theme.radius.lg,
+    padding: 12,
+  },
+  comparisonCol: {
+    alignItems: 'center',
+    flex: 1,
+  },
+  comparisonLabel: {
+    fontSize: 11,
+    fontWeight: '600',
+    color: Colors.text.secondary,
+    textTransform: 'uppercase',
+    marginBottom: 4,
+  },
+  comparisonVal: {
+    fontSize: 14,
+    fontWeight: '700',
+    color: Colors.text.primary,
+  },
+  comparisonBanner: {
+    borderRadius: Theme.radius.lg,
+    padding: 12,
+    alignItems: 'center',
+  },
+  comparisonBannerText: {
+    fontSize: 13,
+    fontWeight: '600',
     textAlign: 'center',
   },
 });
