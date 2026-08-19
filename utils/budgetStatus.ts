@@ -1,6 +1,6 @@
 import { Colors } from '@/constants/colors';
 
-export type BudgetStatusType = 'under' | 'near' | 'exact' | 'over';
+export type BudgetStatusType = 'under' | 'near' | 'exact' | 'over' | 'no_budget';
 
 export interface BudgetStatus {
   status: BudgetStatusType;
@@ -18,8 +18,23 @@ export interface BudgetStatus {
  * 2. NEAR BUDGET: spent < allocated (>= 85%) => "₹X remaining"
  * 3. EXACTLY AT BUDGET: spent === allocated => "Budget reached"
  * 4. OVER BUDGET: spent > allocated => "₹X over budget"
+ * 5. NO BUDGET SET: budget does not exist / allocated is not set => "No budget set"
  */
-export function getBudgetStatus(allocated: number, spent: number): BudgetStatus {
+export function getBudgetStatus(
+  allocated: number | null | undefined,
+  spent: number,
+  hasBudget: boolean = true
+): BudgetStatus {
+  if (!hasBudget || allocated === null || allocated === undefined || allocated <= 0) {
+    return {
+      status: 'no_budget',
+      label: 'No budget set',
+      color: Colors.text.tertiary,
+      formattedDiff: 'Not set',
+      remaining: 0,
+    };
+  }
+
   const remaining = allocated - spent;
 
   if (spent > allocated) {

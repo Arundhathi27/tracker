@@ -8,9 +8,10 @@ import {
   Plus, Search, ChevronLeft, ChevronRight,
   ShoppingBag, Coffee, Car, Zap, Utensils,
   Smartphone, Heart, GraduationCap, PiggyBank, Briefcase, HelpCircle, Trash2, Edit2, Filter, ArrowDownUp,
-  CreditCard, Banknote, Wallet, Landmark, Calendar as CalendarIcon
+  CreditCard, Banknote, Wallet, Landmark, Calendar as CalendarIcon, FileSpreadsheet,
+  CheckCircle2, Circle, CheckSquare, Square, X
 } from 'lucide-react-native';
-import { useTransactions, useDeleteTransaction } from '@/hooks/useTransactions';
+import { useTransactions, useDeleteTransaction, useDeleteTransactionsBatch } from '@/hooks/useTransactions';
 import { useBudgetCategories, useMonthlyBudgetByMonth } from '@/hooks/useBudgets';
 import { usePaymentMethods } from '@/hooks/usePaymentMethods';
 import { Header } from '@/components/ui/Header';
@@ -19,6 +20,7 @@ import { Colors } from '@/constants/colors';
 import { Theme } from '@/constants/theme';
 import { Transaction } from '@/types';
 import { formatCurrency } from '@/utils/formatters';
+import { toISOMonth } from '@/utils/date';
 
 const ICON_MAP: Record<string, React.ElementType> = {
   ShoppingBag, Coffee, Car, Zap, Utensils,
@@ -35,8 +37,6 @@ const getPaymentIcon = (name: string) => {
   return HelpCircle;
 };
 
-import { toISOMonth } from '@/utils/date';
-
 // Generates array of {label, value} for the past 12 months
 function generateMonthOptions() {
   const months = [];
@@ -50,9 +50,20 @@ function generateMonthOptions() {
   return months;
 }
 
-
-function ExpenseRow({ transaction, onEdit, onDelete }: {
+function ExpenseRow({
+  transaction,
+  isSelectMode,
+  isSelected,
+  onPressRow,
+  onLongPressRow,
+  onEdit,
+  onDelete
+}: {
   transaction: Transaction;
+  isSelectMode: boolean;
+  isSelected: boolean;
+  onPressRow: (t: Transaction) => void;
+  onLongPressRow: (t: Transaction) => void;
   onEdit: (t: Transaction) => void;
   onDelete: (t: Transaction) => void;
 }) {
@@ -64,7 +75,26 @@ function ExpenseRow({ transaction, onEdit, onDelete }: {
   const formattedDate = txDate.toLocaleDateString('en-IN', { month: 'short', day: 'numeric', year: 'numeric' });
 
   return (
-    <View style={styles.expenseRow}>
+    <Pressable
+      style={[
+        styles.expenseRow,
+        isSelected && styles.expenseRowSelected
+      ]}
+      onPress={() => onPressRow(transaction)}
+      onLongPress={() => onLongPressRow(transaction)}
+      delayLongPress={250}
+    >
+      {/* Checkbox indicator in selection mode */}
+      {isSelectMode && (
+        <View style={styles.selectionCheckboxWrapper}>
+          {isSelected ? (
+            <CheckCircle2 size={22} color={Colors.primary.DEFAULT} />
+          ) : (
+            <Circle size={22} color={Colors.text.tertiary} />
+          )}
+        </View>
+      )}
+
       <View style={[styles.rowIconWrapper, { backgroundColor: `${iconColor}20` }]}>
         <IconComp size={22} color={iconColor} />
       </View>
@@ -85,16 +115,18 @@ function ExpenseRow({ transaction, onEdit, onDelete }: {
       </View>
       <View style={styles.rowRight}>
         <Text style={styles.rowAmount}>-{formatCurrency(amount)}</Text>
-        <View style={styles.rowActions}>
-          <TouchableOpacity onPress={() => onEdit(transaction)} style={styles.actionBtn}>
-            <Edit2 size={16} color={Colors.text.tertiary} />
-          </TouchableOpacity>
-          <TouchableOpacity onPress={() => onDelete(transaction)} style={styles.actionBtn}>
-            <Trash2 size={16} color={Colors.danger.DEFAULT} />
-          </TouchableOpacity>
-        </View>
+        {!isSelectMode && (
+          <View style={styles.rowActions}>
+            <TouchableOpacity onPress={() => onEdit(transaction)} style={styles.actionBtn}>
+              <Edit2 size={16} color={Colors.text.tertiary} />
+            </TouchableOpacity>
+            <TouchableOpacity onPress={() => onDelete(transaction)} style={styles.actionBtn}>
+              <Trash2 size={16} color={Colors.danger.DEFAULT} />
+            </TouchableOpacity>
+          </View>
+        )}
       </View>
-    </View>
+    </Pressable>
   );
 }
 
@@ -108,7 +140,10 @@ export default function ExpensesOverviewScreen() {
   const [sortBy, setSortBy] = useState<SortType>('newest');
   const [showFilters, setShowFilters] = useState(false);
 
-  // Generated dynamically to prevent stale module-level caching
+  // Multi-select state
+  const [isSelectMode, setIsSelectMode] = useState(false);
+  const [selectedTxIds, setSelectedTxIds] = useState<Set<string>>(new Set());
+
   const monthOptions = React.useMemo(() => generateMonthOptions(), []);
 
   const selectedMonth = monthOptions[selectedMonthIndex];
@@ -124,32 +159,14 @@ export default function ExpensesOverviewScreen() {
   const { data: categories } = useBudgetCategories(budget?.id || '');
   const { data: paymentMethods } = usePaymentMethods();
 
-  const { data: transactions, isLoading } = useTransactions({
+  const { data: transactions, isLoading, refetch } = useTransactions({
     type: 'expense',
     dateStart,
     dateEnd,
   });
 
-  const { mutateAsync: deleteTransaction } = useDeleteTransaction();
-
-  const handleEdit = (tx: Transaction) => {
-    router.push(`/(app)/transactions/${tx.id}` as any);
-  };
-
-  const handleDelete = (tx: Transaction) => {
-    Alert.alert('Delete Expense', 'Are you sure you want to delete this expense?', [
-      { text: 'Cancel', style: 'cancel' },
-      {
-        text: 'Delete',
-        style: 'destructive',
-        onPress: async () => {
-          try {
-            await deleteTransaction(tx.id);
-          } catch {}
-        }
-      }
-    ]);
-  };
+  const { mutateAsync: deleteSingleTransaction } = useDeleteTransaction();
+  const { mutateAsync: deleteBatchTransactions, isPending: isDeletingBatch } = useDeleteTransactionsBatch();
 
   // Client-side realtime search, filtering, and sorting
   const filteredTransactions = useMemo(() => {
@@ -191,6 +208,105 @@ export default function ExpensesOverviewScreen() {
 
   const totalSpent = filteredTransactions.reduce((sum, t) => sum + t.amount, 0);
 
+  // Multi-select actions
+  const handleToggleSelectTx = (tx: Transaction) => {
+    setSelectedTxIds(prev => {
+      const next = new Set(prev);
+      if (next.has(tx.id)) {
+        next.delete(tx.id);
+      } else {
+        next.add(tx.id);
+      }
+      if (next.size === 0) {
+        setIsSelectMode(false);
+      }
+      return next;
+    });
+  };
+
+  const handleRowPress = (tx: Transaction) => {
+    if (isSelectMode) {
+      handleToggleSelectTx(tx);
+    } else {
+      router.push(`/(app)/transactions/${tx.id}` as any);
+    }
+  };
+
+  const handleRowLongPress = (tx: Transaction) => {
+    if (!isSelectMode) {
+      setIsSelectMode(true);
+      setSelectedTxIds(new Set([tx.id]));
+    } else {
+      handleToggleSelectTx(tx);
+    }
+  };
+
+  const handleSelectAll = () => {
+    if (!filteredTransactions || filteredTransactions.length === 0) return;
+    const allFilteredIds = filteredTransactions.map(t => t.id);
+    const areAllSelected = allFilteredIds.every(id => selectedTxIds.has(id));
+
+    if (areAllSelected) {
+      setSelectedTxIds(new Set());
+      setIsSelectMode(false);
+    } else {
+      setSelectedTxIds(new Set(allFilteredIds));
+      setIsSelectMode(true);
+    }
+  };
+
+  const handleCancelSelect = () => {
+    setIsSelectMode(false);
+    setSelectedTxIds(new Set());
+  };
+
+  const handleConfirmBulkDelete = () => {
+    const count = selectedTxIds.size;
+    if (count === 0) return;
+
+    Alert.alert(
+      `Delete ${count} ${count === 1 ? 'expense' : 'expenses'}?`,
+      'This will permanently delete the selected transactions.',
+      [
+        { text: 'Cancel', style: 'cancel' },
+        {
+          text: 'Delete',
+          style: 'destructive',
+          onPress: async () => {
+            try {
+              const idsArray = Array.from(selectedTxIds);
+              await deleteBatchTransactions(idsArray);
+              setSelectedTxIds(new Set());
+              setIsSelectMode(false);
+            } catch (err: any) {
+              Alert.alert('Delete Failed', err?.message || 'Could not delete selected expenses. Please try again.');
+              refetch();
+            }
+          },
+        },
+      ]
+    );
+  };
+
+  const handleEdit = (tx: Transaction) => {
+    router.push(`/(app)/transactions/${tx.id}` as any);
+  };
+
+  const handleDeleteSingle = (tx: Transaction) => {
+    Alert.alert('Delete Expense', 'Are you sure you want to delete this expense?', [
+      { text: 'Cancel', style: 'cancel' },
+      {
+        text: 'Delete',
+        style: 'destructive',
+        onPress: async () => {
+          try {
+            await deleteSingleTransaction(tx.id);
+          } catch {}
+        }
+      }
+    ]);
+  };
+
   const renderEmptyComponent = () => {
     if (isLoading) {
       return (
@@ -225,16 +341,72 @@ export default function ExpensesOverviewScreen() {
     );
   };
 
+  const areAllFilteredSelected = filteredTransactions.length > 0 &&
+    filteredTransactions.every(t => selectedTxIds.has(t.id));
+
   return (
     <View style={styles.container}>
-      <Header 
-        title="Expenses" 
-        rightElement={
-          <TouchableOpacity onPress={() => router.push('/(app)/calendar' as any)} style={{ padding: 4 }}>
-            <CalendarIcon size={24} color={Colors.text.primary} />
+      {/* Header switches to Select Mode Header when selecting */}
+      {isSelectMode ? (
+        <View style={styles.selectHeaderBar}>
+          <TouchableOpacity onPress={handleCancelSelect} style={styles.headerBtn}>
+            <X size={22} color={Colors.text.primary} />
           </TouchableOpacity>
-        }
-      />
+          <Text style={styles.selectHeaderTitle}>
+            {selectedTxIds.size} {selectedTxIds.size === 1 ? 'expense' : 'expenses'} selected
+          </Text>
+          <TouchableOpacity onPress={handleSelectAll} style={styles.headerBtn}>
+            <Text style={styles.selectAllText}>
+              {areAllFilteredSelected ? 'Deselect All' : 'Select All'}
+            </Text>
+          </TouchableOpacity>
+        </View>
+      ) : (
+        <Header 
+          title="Expenses" 
+          rightElement={
+            <View style={{ flexDirection: 'row', alignItems: 'center', gap: 12 }}>
+              {filteredTransactions.length > 0 && (
+                <TouchableOpacity
+                  onPress={() => {
+                    setIsSelectMode(true);
+                    setSelectedTxIds(new Set());
+                  }}
+                  style={{ padding: 4 }}
+                >
+                  <Text style={{ fontSize: 13, fontWeight: '700', color: Colors.primary.DEFAULT }}>Select</Text>
+                </TouchableOpacity>
+              )}
+              <TouchableOpacity onPress={() => router.push('/(app)/transactions/import' as any)} style={{ padding: 4 }}>
+                <FileSpreadsheet size={22} color={Colors.primary.DEFAULT} />
+              </TouchableOpacity>
+              <TouchableOpacity onPress={() => router.push('/(app)/calendar' as any)} style={{ padding: 4 }}>
+                <CalendarIcon size={24} color={Colors.text.primary} />
+              </TouchableOpacity>
+            </View>
+          }
+        />
+      )}
+
+      {/* Import Expenses Banner Entry Point */}
+      {!isSelectMode && (
+        <View style={styles.importBannerWrapper}>
+          <TouchableOpacity
+            style={styles.importBannerCard}
+            onPress={() => router.push('/(app)/transactions/import' as any)}
+            activeOpacity={0.8}
+          >
+            <View style={styles.importBannerIconWrap}>
+              <FileSpreadsheet size={20} color={Colors.primary.DEFAULT} />
+            </View>
+            <View style={styles.importBannerBody}>
+              <Text style={styles.importBannerTitle}>Import Expenses</Text>
+              <Text style={styles.importBannerSub}>Add multiple expenses from a CSV or Excel file</Text>
+            </View>
+            <ChevronRight size={18} color={Colors.text.tertiary} />
+          </TouchableOpacity>
+        </View>
+      )}
 
       {/* Search Bar */}
       <View style={styles.searchBarContainer}>
@@ -364,20 +536,48 @@ export default function ExpensesOverviewScreen() {
         keyExtractor={(item) => item.id}
         contentContainerStyle={styles.listContent}
         renderItem={({ item }) => (
-          <ExpenseRow transaction={item} onEdit={handleEdit} onDelete={handleDelete} />
+          <ExpenseRow
+            transaction={item}
+            isSelectMode={isSelectMode}
+            isSelected={selectedTxIds.has(item.id)}
+            onPressRow={handleRowPress}
+            onLongPressRow={handleRowLongPress}
+            onEdit={handleEdit}
+            onDelete={handleDeleteSingle}
+          />
         )}
         ListEmptyComponent={renderEmptyComponent}
       />
 
-      {/* Floating Add Button */}
-      <View style={styles.fabContainer}>
-        <Pressable
-          style={styles.fab}
-          onPress={() => router.push('/(app)/transactions/create' as any)}
-        >
-          <Plus size={28} color={Colors.white} />
-        </Pressable>
-      </View>
+      {/* Bulk Delete Bottom Action Bar */}
+      {isSelectMode ? (
+        <View style={styles.bulkActionBar}>
+          <TouchableOpacity style={styles.bulkCancelBtn} onPress={handleCancelSelect}>
+            <Text style={styles.bulkCancelBtnText}>Cancel</Text>
+          </TouchableOpacity>
+
+          <Button
+            label={`Delete ${selectedTxIds.size > 0 ? `(${selectedTxIds.size})` : ''}`}
+            onPress={handleConfirmBulkDelete}
+            variant="primary"
+            size="md"
+            style={styles.bulkDeleteBtn}
+            disabled={selectedTxIds.size === 0 || isDeletingBatch}
+            isLoading={isDeletingBatch}
+            leftIcon={<Trash2 size={18} color={Colors.white} />}
+          />
+        </View>
+      ) : (
+        /* Floating Add Button */
+        <View style={styles.fabContainer}>
+          <Pressable
+            style={styles.fab}
+            onPress={() => router.push('/(app)/transactions/create' as any)}
+          >
+            <Plus size={28} color={Colors.white} />
+          </Pressable>
+        </View>
+      )}
     </View>
   );
 }
@@ -386,6 +586,29 @@ const styles = StyleSheet.create({
   container: {
     flex: 1,
     backgroundColor: Colors.background.DEFAULT,
+  },
+  selectHeaderBar: {
+    height: 56,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    paddingHorizontal: 20,
+    backgroundColor: Colors.surface.DEFAULT,
+    borderBottomWidth: 1,
+    borderBottomColor: Colors.border.DEFAULT,
+  },
+  headerBtn: {
+    padding: 6,
+  },
+  selectHeaderTitle: {
+    fontSize: 16,
+    fontWeight: '700',
+    color: Colors.text.primary,
+  },
+  selectAllText: {
+    fontSize: 13,
+    fontWeight: '700',
+    color: Colors.primary.DEFAULT,
   },
   searchBarContainer: {
     flexDirection: 'row',
@@ -500,7 +723,7 @@ const styles = StyleSheet.create({
     marginTop: 2,
   },
   listContent: {
-    paddingBottom: 100,
+    paddingBottom: 110,
     flexGrow: 1,
   },
   expenseRow: {
@@ -511,6 +734,12 @@ const styles = StyleSheet.create({
     paddingVertical: 14,
     borderBottomWidth: 1,
     borderBottomColor: Colors.border.DEFAULT,
+  },
+  expenseRowSelected: {
+    backgroundColor: `${Colors.primary.DEFAULT}10`,
+  },
+  selectionCheckboxWrapper: {
+    marginRight: 12,
   },
   rowIconWrapper: {
     width: 46,
@@ -630,5 +859,73 @@ const styles = StyleSheet.create({
     shadowOpacity: 0.25,
     shadowRadius: 8,
     elevation: 6,
+  },
+  importBannerWrapper: {
+    paddingHorizontal: 20,
+    paddingTop: 12,
+  },
+  importBannerCard: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: Colors.surface.DEFAULT,
+    borderRadius: Theme.radius.lg,
+    borderWidth: 1,
+    borderColor: Colors.border.DEFAULT,
+    padding: 12,
+    gap: 12,
+    ...Theme.shadows.sm,
+  },
+  importBannerIconWrap: {
+    width: 38,
+    height: 38,
+    borderRadius: 19,
+    backgroundColor: `${Colors.primary.DEFAULT}15`,
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  importBannerBody: {
+    flex: 1,
+  },
+  importBannerTitle: {
+    fontSize: 14,
+    fontWeight: '700',
+    color: Colors.text.primary,
+  },
+  importBannerSub: {
+    fontSize: 12,
+    color: Colors.text.secondary,
+    marginTop: 2,
+  },
+  bulkActionBar: {
+    position: 'absolute',
+    bottom: 0,
+    left: 0,
+    right: 0,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    backgroundColor: Colors.surface.DEFAULT,
+    paddingHorizontal: 20,
+    paddingVertical: 14,
+    borderTopWidth: 1,
+    borderTopColor: Colors.border.DEFAULT,
+    ...Theme.shadows.lg,
+  },
+  bulkCancelBtn: {
+    paddingHorizontal: 16,
+    paddingVertical: 10,
+    borderRadius: Theme.radius.lg,
+    backgroundColor: Colors.background.DEFAULT,
+    borderWidth: 1,
+    borderColor: Colors.border.DEFAULT,
+  },
+  bulkCancelBtnText: {
+    fontSize: 14,
+    fontWeight: '600',
+    color: Colors.text.primary,
+  },
+  bulkDeleteBtn: {
+    backgroundColor: Colors.danger.DEFAULT,
+    minWidth: 140,
   },
 });

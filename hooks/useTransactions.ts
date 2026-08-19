@@ -6,6 +6,7 @@ import {
   TransactionFilters
 } from '@/services/transactionService';
 import { useAuthStore } from '@/store';
+import { importService, ImportExpenseItem } from '@/services/importService';
 
 export const TRANSACTION_KEYS = {
   all: (userId?: string) => ['transactions', userId] as const,
@@ -45,6 +46,52 @@ export function useCreateTransaction() {
       queryClient.invalidateQueries({ queryKey: ['monthly_budgets'] });
       queryClient.invalidateQueries({ queryKey: ['budget_categories'] });
       queryClient.invalidateQueries({ queryKey: ['payment_methods'] });
+      queryClient.invalidateQueries({ queryKey: ['fixed_expenses'] });
+      queryClient.invalidateQueries({ queryKey: ['fixed_expense_overrides'] });
+      queryClient.invalidateQueries({ queryKey: ['spending_insights'] });
+      queryClient.invalidateQueries({ queryKey: ['reports'] });
+    },
+  });
+}
+
+export function useCreateTransactionsBatch() {
+  const queryClient = useQueryClient();
+
+  return useMutation({
+    mutationFn: async (dtos: CreateTransactionDto[]) => {
+      const res = await transactionService.createTransactionsBatch(dtos);
+      return res;
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['transactions'] });
+      queryClient.invalidateQueries({ queryKey: ['monthly_budgets'] });
+      queryClient.invalidateQueries({ queryKey: ['budget_categories'] });
+      queryClient.invalidateQueries({ queryKey: ['payment_methods'] });
+      queryClient.invalidateQueries({ queryKey: ['fixed_expenses'] });
+      queryClient.invalidateQueries({ queryKey: ['fixed_expense_overrides'] });
+      queryClient.invalidateQueries({ queryKey: ['spending_insights'] });
+      queryClient.invalidateQueries({ queryKey: ['reports'] });
+    },
+  });
+}
+
+export function useImportExpenses() {
+  const queryClient = useQueryClient();
+
+  return useMutation({
+    mutationFn: async (items: ImportExpenseItem[]) => {
+      const res = await importService.importExpenses(items);
+      return res;
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['transactions'] });
+      queryClient.invalidateQueries({ queryKey: ['monthly_budgets'] });
+      queryClient.invalidateQueries({ queryKey: ['budget_categories'] });
+      queryClient.invalidateQueries({ queryKey: ['payment_methods'] });
+      queryClient.invalidateQueries({ queryKey: ['fixed_expenses'] });
+      queryClient.invalidateQueries({ queryKey: ['fixed_expense_overrides'] });
+      queryClient.invalidateQueries({ queryKey: ['spending_insights'] });
+      queryClient.invalidateQueries({ queryKey: ['reports'] });
     },
   });
 }
@@ -60,6 +107,10 @@ export function useUpdateTransaction() {
       queryClient.invalidateQueries({ queryKey: ['monthly_budgets'] });
       queryClient.invalidateQueries({ queryKey: ['budget_categories'] });
       queryClient.invalidateQueries({ queryKey: ['payment_methods'] });
+      queryClient.invalidateQueries({ queryKey: ['fixed_expenses'] });
+      queryClient.invalidateQueries({ queryKey: ['fixed_expense_overrides'] });
+      queryClient.invalidateQueries({ queryKey: ['spending_insights'] });
+      queryClient.invalidateQueries({ queryKey: ['reports'] });
     },
   });
 }
@@ -74,6 +125,28 @@ export function useDeleteTransaction() {
       queryClient.invalidateQueries({ queryKey: ['monthly_budgets'] });
       queryClient.invalidateQueries({ queryKey: ['budget_categories'] });
       queryClient.invalidateQueries({ queryKey: ['payment_methods'] });
+      queryClient.invalidateQueries({ queryKey: ['fixed_expenses'] });
+      queryClient.invalidateQueries({ queryKey: ['fixed_expense_overrides'] });
+      queryClient.invalidateQueries({ queryKey: ['spending_insights'] });
+      queryClient.invalidateQueries({ queryKey: ['reports'] });
+    },
+  });
+}
+
+export function useDeleteTransactionsBatch() {
+  const queryClient = useQueryClient();
+
+  return useMutation({
+    mutationFn: (ids: string[]) => transactionService.deleteTransactionsBatch(ids),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['transactions'] });
+      queryClient.invalidateQueries({ queryKey: ['monthly_budgets'] });
+      queryClient.invalidateQueries({ queryKey: ['budget_categories'] });
+      queryClient.invalidateQueries({ queryKey: ['payment_methods'] });
+      queryClient.invalidateQueries({ queryKey: ['fixed_expenses'] });
+      queryClient.invalidateQueries({ queryKey: ['fixed_expense_overrides'] });
+      queryClient.invalidateQueries({ queryKey: ['spending_insights'] });
+      queryClient.invalidateQueries({ queryKey: ['reports'] });
     },
   });
 }

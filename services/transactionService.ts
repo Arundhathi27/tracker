@@ -112,6 +112,28 @@ class TransactionService extends BaseService {
     }
   }
 
+  async createTransactionsBatch(dtos: CreateTransactionDto[]): Promise<Transaction[]> {
+    try {
+      if (!dtos || dtos.length === 0) return [];
+      const { data: userData, error: userError } = await this.supabase.auth.getUser();
+      if (userError) throw userError;
+
+      const rowsToInsert = dtos.map(dto => ({
+        ...dto,
+        user_id: userData.user.id,
+      }));
+
+      const { data, error } = await (this.supabase.from('transactions') as any)
+        .insert(rowsToInsert)
+        .select('*, category:budget_categories(*), payment_method:payment_methods(*)');
+
+      if (error) throw error;
+      return data as Transaction[];
+    } catch (error) {
+      this.handleError(error);
+    }
+  }
+
   async updateTransaction(id: string, dto: UpdateTransactionDto): Promise<Transaction> {
     try {
       const { data, error } = await (this.supabase.from('transactions') as any)
@@ -129,12 +151,47 @@ class TransactionService extends BaseService {
 
   async deleteTransaction(id: string): Promise<void> {
     try {
+      const { data: userData, error: userError } = await this.supabase.auth.getUser();
+      if (userError) throw userError;
+
       const { error } = await this.supabase
         .from('transactions')
         .delete()
+        .eq('user_id', userData.user.id)
         .eq('id', id);
 
       if (error) throw error;
+    } catch (error) {
+      this.handleError(error);
+    }
+  }
+
+  async deleteTransactionsBatch(ids: string[]): Promise<number> {
+    try {
+      if (!ids || ids.length === 0) return 0;
+      const { data: userData, error: userError } = await this.supabase.auth.getUser();
+      if (userError) throw userError;
+
+      const CHUNK_SIZE = 50;
+      let deletedTotal = 0;
+
+      for (let i = 0; i < ids.length; i += CHUNK_SIZE) {
+        const chunk = ids.slice(i, i + CHUNK_SIZE);
+        const { error, count } = await this.supabase
+          .from('transactions')
+          .delete({ count: 'exact' })
+          .eq('user_id', userData.user.id) // User scoping!
+          .in('id', chunk);
+
+        if (error) throw error;
+        if (count !== null && count !== undefined) {
+          deletedTotal += count;
+        } else {
+          deletedTotal += chunk.length;
+        }
+      }
+
+      return deletedTotal;
     } catch (error) {
       this.handleError(error);
     }

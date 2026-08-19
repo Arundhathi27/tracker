@@ -102,6 +102,12 @@ export default function AppLayout() {
           href: null,
         }}
       />
+      <Tabs.Screen
+        name="transactions/import/index"
+        options={{
+          href: null,
+        }}
+      />
       </Tabs>
     </SafeAreaView>
   );

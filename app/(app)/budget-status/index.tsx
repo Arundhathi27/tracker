@@ -5,7 +5,7 @@ import {
 } from 'react-native';
 import { router, useFocusEffect } from 'expo-router';
 import {
-  ChevronLeft, ChevronRight, PieChart, Plus,
+  ChevronLeft, ChevronRight, PieChart,
   ShoppingBag, Coffee, Car, Zap, Utensils, Smartphone,
   Heart, GraduationCap, PiggyBank, Briefcase, HelpCircle
 } from 'lucide-react-native';
@@ -95,21 +95,67 @@ export default function CategoryBudgetReportScreen() {
 
   const isLoading = loadingBudget || loadingCats || loadingExpenses;
 
+  // ── Unified Report Items (Handles budgeted categories + unbudgeted expenses) ──
+  const reportItems = useMemo(() => {
+    if (categories && categories.length > 0) {
+      return categories.map(cat => ({
+        id: cat.id,
+        name: cat.name,
+        icon: cat.icon || 'HelpCircle',
+        color: cat.color || Colors.primary.DEFAULT,
+        allocatedAmount: cat.allocated_amount,
+        spentAmount: cat.spent_amount,
+        hasBudget: cat.allocated_amount > 0,
+      }));
+    }
+
+    // If no budget set for this month, aggregate expenses by category
+    if (expenses && expenses.length > 0) {
+      const catGroup: Record<string, { spent: number; icon: string; color: string }> = {};
+
+      expenses.forEach(tx => {
+        const catName = tx.category?.name || tx.description || 'General';
+        if (!catGroup[catName]) {
+          catGroup[catName] = {
+            spent: 0,
+            icon: tx.category?.icon || 'HelpCircle',
+            color: tx.category?.color || Colors.primary.DEFAULT,
+          };
+        }
+        catGroup[catName].spent += Number(tx.amount || 0);
+      });
+
+      return Object.keys(catGroup).map((catName, idx) => ({
+        id: `unbudgeted-${idx}-${catName}`,
+        name: catName,
+        icon: catGroup[catName].icon,
+        color: catGroup[catName].color,
+        allocatedAmount: 0,
+        spentAmount: catGroup[catName].spent,
+        hasBudget: false,
+      }));
+    }
+
+    return [];
+  }, [categories, expenses]);
+
   // ── Summary Status Breakdown ──
   const summary = useMemo(() => {
     let underCount = 0;
     let exactCount = 0;
     let overCount = 0;
+    let noBudgetCount = 0;
 
-    (categories || []).forEach(cat => {
-      const status = getBudgetStatus(cat.allocated_amount, cat.spent_amount);
+    reportItems.forEach(item => {
+      const status = getBudgetStatus(item.allocatedAmount, item.spentAmount, item.hasBudget);
       if (status.status === 'under') underCount++;
       else if (status.status === 'exact') exactCount++;
       else if (status.status === 'over') overCount++;
+      else if (status.status === 'no_budget') noBudgetCount++;
     });
 
-    return { underCount, exactCount, overCount };
-  }, [categories]);
+    return { underCount, exactCount, overCount, noBudgetCount };
+  }, [reportItems]);
 
   return (
     <View style={styles.container}>
@@ -143,11 +189,11 @@ export default function CategoryBudgetReportScreen() {
           <View style={styles.loadingBox}>
             <ActivityIndicator size="large" color={Colors.primary.DEFAULT} />
           </View>
-        ) : !categories || categories.length === 0 ? (
+        ) : reportItems.length === 0 ? (
           <View style={styles.emptyCard}>
             <PieChart size={48} color={Colors.text.tertiary} />
-            <Text style={styles.emptyTitle}>No category budgets yet</Text>
-            <Text style={styles.emptySubtitle}>Set up budget categories for {monthLabel} to track spending status.</Text>
+            <Text style={styles.emptyTitle}>No expenses or budgets for {monthLabel}</Text>
+            <Text style={styles.emptySubtitle}>No records found for this month.</Text>
             <Button
               label="Set Up Budget"
               onPress={() => router.push('/(app)/budget' as any)}
@@ -158,40 +204,49 @@ export default function CategoryBudgetReportScreen() {
           <>
             {/* ── Status Summary Header Banner ── */}
             <View style={styles.summaryRow}>
-              <View style={[styles.summaryCard, { borderColor: `${Colors.success.DEFAULT}40` }]}>
-                <Text style={[styles.summaryCount, { color: Colors.success.DEFAULT }]}>{summary.underCount}</Text>
-                <Text style={styles.summaryLabel}>Under Budget</Text>
-              </View>
-              <View style={[styles.summaryCard, { borderColor: `${Colors.primary.DEFAULT}40` }]}>
-                <Text style={[styles.summaryCount, { color: Colors.primary.DEFAULT }]}>{summary.exactCount}</Text>
-                <Text style={styles.summaryLabel}>Reached</Text>
-              </View>
-              <View style={[styles.summaryCard, { borderColor: `${Colors.danger.DEFAULT}40` }]}>
-                <Text style={[styles.summaryCount, { color: Colors.danger.DEFAULT }]}>{summary.overCount}</Text>
-                <Text style={styles.summaryLabel}>Over Budget</Text>
-              </View>
+              {summary.noBudgetCount > 0 && summary.underCount === 0 && summary.overCount === 0 ? (
+                <View style={[styles.summaryCard, { flex: 1, borderColor: Colors.border.DEFAULT }]}>
+                  <Text style={[styles.summaryCount, { color: Colors.text.primary }]}>{summary.noBudgetCount}</Text>
+                  <Text style={styles.summaryLabel}>No Budget Set</Text>
+                </View>
+              ) : (
+                <>
+                  <View style={[styles.summaryCard, { borderColor: `${Colors.success.DEFAULT}40` }]}>
+                    <Text style={[styles.summaryCount, { color: Colors.success.DEFAULT }]}>{summary.underCount}</Text>
+                    <Text style={styles.summaryLabel}>Under Budget</Text>
+                  </View>
+                  <View style={[styles.summaryCard, { borderColor: `${Colors.primary.DEFAULT}40` }]}>
+                    <Text style={[styles.summaryCount, { color: Colors.primary.DEFAULT }]}>{summary.exactCount}</Text>
+                    <Text style={styles.summaryLabel}>Reached</Text>
+                  </View>
+                  <View style={[styles.summaryCard, { borderColor: `${Colors.danger.DEFAULT}40` }]}>
+                    <Text style={[styles.summaryCount, { color: Colors.danger.DEFAULT }]}>{summary.overCount}</Text>
+                    <Text style={styles.summaryLabel}>Over Budget</Text>
+                  </View>
+                </>
+              )}
             </View>
 
             {/* ── Category Report List ── */}
             <View style={styles.reportList}>
-              {categories.map((cat: BudgetCategory) => {
-                const IconComp = ICON_MAP[cat.icon] || HelpCircle;
-                const status = getBudgetStatus(cat.allocated_amount, cat.spent_amount);
-                const progress = cat.allocated_amount > 0 ? cat.spent_amount / cat.allocated_amount : 0;
-                const catColor = cat.color || Colors.primary.DEFAULT;
+              {reportItems.map(item => {
+                const IconComp = ICON_MAP[item.icon] || HelpCircle;
+                const status = getBudgetStatus(item.allocatedAmount, item.spentAmount, item.hasBudget);
+                const progress = item.hasBudget && item.allocatedAmount > 0 ? item.spentAmount / item.allocatedAmount : 0;
+                const catColor = item.color || Colors.primary.DEFAULT;
 
                 return (
-                  <View key={cat.id} style={styles.reportCard}>
+                  <View key={item.id} style={styles.reportCard}>
                     <View style={styles.reportCardHeader}>
                       <View style={styles.catTitleGroup}>
                         <View style={[styles.catIconWrap, { backgroundColor: `${catColor}20` }]}>
                           <IconComp size={20} color={catColor} />
                         </View>
-                        <Text style={styles.catName}>{cat.name}</Text>
+                        <Text style={styles.catName}>{item.name}</Text>
                       </View>
                       <View style={[styles.statusBadge, { backgroundColor: `${status.color}15`, borderColor: `${status.color}40` }]}>
                         <Text style={[styles.statusBadgeText, { color: status.color }]}>
-                          {status.status.toUpperCase()}
+                          {status.status === 'no_budget' ? 'NO BUDGET SET' : status.status.toUpperCase()}
                         </Text>
                       </View>
                     </View>
@@ -201,11 +256,13 @@ export default function CategoryBudgetReportScreen() {
                     <View style={styles.metricsGrid}>
                       <View style={styles.metricItem}>
                         <Text style={styles.metricLabel}>Budget</Text>
-                        <Text style={styles.metricVal}>{formatCurrency(cat.allocated_amount)}</Text>
+                        <Text style={styles.metricVal}>
+                          {item.hasBudget ? formatCurrency(item.allocatedAmount) : 'Not set'}
+                        </Text>
                       </View>
                       <View style={styles.metricItem}>
                         <Text style={styles.metricLabel}>Spent</Text>
-                        <Text style={styles.metricVal}>{formatCurrency(cat.spent_amount)}</Text>
+                        <Text style={styles.metricVal}>{formatCurrency(item.spentAmount)}</Text>
                       </View>
                       <View style={styles.metricItemRight}>
                         <Text style={styles.metricLabel}>Status</Text>
@@ -241,7 +298,6 @@ const styles = StyleSheet.create({
     paddingVertical: 80,
     alignItems: 'center',
   },
-  // Month selector
   monthSelector: {
     flexDirection: 'row',
     alignItems: 'center',
@@ -262,7 +318,6 @@ const styles = StyleSheet.create({
     fontWeight: '700',
     color: Colors.text.primary,
   },
-  // Summary row
   summaryRow: {
     flexDirection: 'row',
     gap: 10,
@@ -287,7 +342,6 @@ const styles = StyleSheet.create({
     color: Colors.text.secondary,
     textTransform: 'uppercase',
   },
-  // Report list
   reportList: {
     gap: 12,
   },
@@ -359,7 +413,6 @@ const styles = StyleSheet.create({
     fontSize: 14,
     fontWeight: '700',
   },
-  // Empty state
   emptyCard: {
     backgroundColor: Colors.surface.DEFAULT,
     borderRadius: Theme.radius.xl,
