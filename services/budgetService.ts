@@ -83,6 +83,12 @@ class BudgetService extends BaseService {
       const { data: userData, error: userError } = await this.supabase.auth.getUser();
       if (userError) throw userError;
 
+      // Duplicate protection: if budget already exists for this month, update it
+      const existing = await this.getMonthlyBudgetByMonth(dto.month);
+      if (existing) {
+        return await this.updateMonthlyBudget(existing.id, { total_amount: dto.total_amount });
+      }
+
       const { data, error } = await this.supabase
         .from('monthly_budgets')
         .insert({

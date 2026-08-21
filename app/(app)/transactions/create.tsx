@@ -10,6 +10,7 @@ import { Button } from '@/components/ui/Button';
 import { useCreateTransaction } from '@/hooks/useTransactions';
 import { CategorySelect } from '@/components/budget/CategorySelect';
 import { PaymentMethodSelect } from '@/components/transactions/PaymentMethodSelect';
+import { budgetService } from '@/services/budgetService';
 import { Colors } from '@/constants/colors';
 import { Theme } from '@/constants/theme';
 import { toISODate } from '@/utils/date';
@@ -53,24 +54,43 @@ export default function CreateExpenseScreen() {
   const onSubmit = async (data: ExpenseFormValues) => {
     setError(null);
     setIsSubmitting(true);
-    
 
-    
     try {
-      console.log('--- Before calling createExpense() ---');
+      let finalCatId: string | null = data.category_id || null;
+
+      // If category_id is a synthetic std- ID, attempt matching against existing user categories
+      if (finalCatId && (finalCatId.startsWith('std-') || !finalCatId.includes('-'))) {
+        const catName = finalCatId.replace('std-', '');
+        try {
+          const allBudgets = await budgetService.getMonthlyBudgets();
+          let foundId: string | null = null;
+          for (const mb of allBudgets) {
+            if (mb.budget_categories) {
+              const match = mb.budget_categories.find(c => c.name.toLowerCase().trim() === catName.toLowerCase().trim());
+              if (match) {
+                foundId = match.id;
+                break;
+              }
+            }
+          }
+          finalCatId = foundId;
+        } catch {
+          finalCatId = null;
+        }
+      }
+
       await createTransaction({
         type: 'expense',
         amount: Number(data.amount),
         description: data.description || 'Expense',
         date: data.date,
-        category_id: data.category_id,
+        category_id: finalCatId,
         payment_method_id: data.payment_method_id || null,
       });
-      console.log('--- Before router.back() ---');
+
       setIsSubmitting(false);
       router.back();
     } catch (err: any) {
-      console.log('--- Inside onError() catch block ---', err);
       setError(err.message || 'Failed to create expense');
       setIsSubmitting(false);
     }

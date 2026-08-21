@@ -1,8 +1,9 @@
-import React, { useState } from 'react';
+import React, { useState, useMemo } from 'react';
 import { View, Text, StyleSheet, ScrollView, ActivityIndicator, Alert, KeyboardAvoidingView, Platform, Pressable } from 'react-native';
 import { useLocalSearchParams, router } from 'expo-router';
 import { Trash2, Plus, Edit2, ShoppingBag, Coffee, Car, Zap, Utensils, Smartphone, Heart, GraduationCap, PiggyBank, Briefcase, HelpCircle } from 'lucide-react-native';
 import { useMonthlyBudget, useUpdateMonthlyBudget, useDeleteMonthlyBudget, useBudgetCategories, useCreateBudgetCategory, useUpdateBudgetCategory, useDeleteBudgetCategory } from '@/hooks/useBudgets';
+import { useTransactions } from '@/hooks/useTransactions';
 import { Header } from '@/components/ui/Header';
 import { Button } from '@/components/ui/Button';
 import { CategoryModal } from '@/components/budget/CategoryModal';
@@ -18,11 +19,34 @@ const ICON_MAP: Record<string, React.ElementType> = {
   ShoppingBag, Coffee, Car, Zap, Utensils, Smartphone, Heart, GraduationCap, PiggyBank, Briefcase, HelpCircle
 };
 
+function getMonthDateRange(monthKey: string) {
+  if (!monthKey || !monthKey.includes('-')) return { dateStart: undefined, dateEnd: undefined };
+  const [yStr, mStr] = monthKey.split('-');
+  const y = parseInt(yStr, 10);
+  const m = parseInt(mStr, 10) - 1;
+  const pad = (n: number) => String(n).padStart(2, '0');
+  const lastDay = new Date(y, m + 1, 0).getDate();
+  return {
+    dateStart: `${y}-${pad(m + 1)}-01`,
+    dateEnd: `${y}-${pad(m + 1)}-${lastDay}`,
+  };
+}
+
 export default function BudgetDetailScreen() {
   const { id } = useLocalSearchParams<{ id: string }>();
   const { data: budget, isLoading: isFetchingBudget } = useMonthlyBudget(id);
   const { data: categories, isLoading: isFetchingCategories } = useBudgetCategories(id);
   
+  const { dateStart, dateEnd } = useMemo(() => {
+    return getMonthDateRange(budget?.month || '');
+  }, [budget?.month]);
+
+  const { data: expenses } = useTransactions({
+    type: 'expense',
+    dateStart,
+    dateEnd,
+  });
+
   const { mutateAsync: deleteBudget } = useDeleteMonthlyBudget();
   const { mutateAsync: updateBudget } = useUpdateMonthlyBudget();
   const { mutateAsync: createCategory } = useCreateBudgetCategory();
@@ -101,6 +125,31 @@ export default function BudgetDetailScreen() {
     }
   };
 
+  // Map category spent amounts including transactions created before or after budget creation
+  const categorySpentMap = useMemo(() => {
+    const map: Record<string, number> = {};
+    if (categories) {
+      categories.forEach(c => {
+        map[c.id] = c.spent_amount || 0;
+      });
+    }
+
+    if (categories && expenses && expenses.length > 0) {
+      categories.forEach(cat => {
+        const lowerName = cat.name.trim().toLowerCase();
+        const txSum = expenses
+          .filter(tx => {
+            const txCat = tx.category?.name || tx.description;
+            return txCat && txCat.trim().toLowerCase() === lowerName;
+          })
+          .reduce((sum, tx) => sum + Number(tx.amount || 0), 0);
+        map[cat.id] = Math.max(cat.spent_amount || 0, txSum);
+      });
+    }
+
+    return map;
+  }, [categories, expenses]);
+
   if (isFetchingBudget) {
     return (
       <View style={[styles.container, styles.centerContainer]}>
@@ -118,7 +167,7 @@ export default function BudgetDetailScreen() {
     );
   }
 
-  const totalSpent = categories?.reduce((sum, cat) => sum + cat.spent_amount, 0) || 0;
+  const totalSpent = categories?.reduce((sum, cat) => sum + (categorySpentMap[cat.id] ?? cat.spent_amount), 0) || 0;
   const mainStatus = getBudgetStatus(budget.total_amount, totalSpent);
   const progress = budget.total_amount > 0 ? Math.min(totalSpent / budget.total_amount, 1) : 0;
   const progressPct = Math.round((totalSpent / (budget.total_amount || 1)) * 100);
@@ -194,7 +243,8 @@ export default function BudgetDetailScreen() {
           ) : (
             categories?.map(cat => {
               const IconComp = ICON_MAP[cat.icon] || ShoppingBag;
-              const catStatus = getBudgetStatus(cat.allocated_amount, cat.spent_amount);
+              const catSpent = categorySpentMap[cat.id] ?? cat.spent_amount;
+              const catStatus = getBudgetStatus(cat.allocated_amount, catSpent);
               return (
                 <Pressable key={cat.id} style={styles.categoryRow} onPress={() => handleOpenEdit(cat)}>
                   <View style={[styles.iconWrapper, { backgroundColor: `${cat.color}20` }]}>
@@ -260,7 +310,7 @@ const styles = StyleSheet.create({
   scrollContent: {
     flexGrow: 1,
     padding: 24,
-    paddingBottom: 100, // Space for FAB
+    paddingBottom: 100,
   },
   centerContainer: {
     flex: 1,

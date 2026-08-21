@@ -95,48 +95,84 @@ export default function CategoryBudgetReportScreen() {
 
   const isLoading = loadingBudget || loadingCats || loadingExpenses;
 
-  // ── Unified Report Items (Handles budgeted categories + unbudgeted expenses) ──
+  // ── Unified Report Items (Combines budgeted categories + unbudgeted expenses) ──
   const reportItems = useMemo(() => {
+    const items: {
+      id: string;
+      name: string;
+      icon: string;
+      color: string;
+      allocatedAmount: number;
+      spentAmount: number;
+      hasBudget: boolean;
+    }[] = [];
+
+    const budgetedCatNames = new Set<string>();
+
+    // 1. Map budgeted categories
     if (categories && categories.length > 0) {
-      return categories.map(cat => ({
-        id: cat.id,
-        name: cat.name,
-        icon: cat.icon || 'HelpCircle',
-        color: cat.color || Colors.primary.DEFAULT,
-        allocatedAmount: cat.allocated_amount,
-        spentAmount: cat.spent_amount,
-        hasBudget: cat.allocated_amount > 0,
-      }));
+      categories.forEach(cat => {
+        const lowerName = cat.name.trim().toLowerCase();
+        budgetedCatNames.add(lowerName);
+
+        // Sum actual transactions for this month for this category
+        let actualSpent = cat.spent_amount || 0;
+        if (expenses && expenses.length > 0) {
+          const txSum = expenses
+            .filter(tx => {
+              const txCat = tx.category?.name || tx.description;
+              return txCat && txCat.trim().toLowerCase() === lowerName;
+            })
+            .reduce((sum, tx) => sum + Number(tx.amount || 0), 0);
+          actualSpent = Math.max(actualSpent, txSum);
+        }
+
+        items.push({
+          id: cat.id,
+          name: cat.name,
+          icon: cat.icon || 'HelpCircle',
+          color: cat.color || Colors.primary.DEFAULT,
+          allocatedAmount: cat.allocated_amount,
+          spentAmount: actualSpent,
+          hasBudget: true,
+        });
+      });
     }
 
-    // If no budget set for this month, aggregate expenses by category
+    // 2. Include unbudgeted expenses for this month
     if (expenses && expenses.length > 0) {
-      const catGroup: Record<string, { spent: number; icon: string; color: string }> = {};
+      const unbudgetedGroup: Record<string, { spent: number; icon: string; color: string }> = {};
 
       expenses.forEach(tx => {
-        const catName = tx.category?.name || tx.description || 'General';
-        if (!catGroup[catName]) {
-          catGroup[catName] = {
-            spent: 0,
-            icon: tx.category?.icon || 'HelpCircle',
-            color: tx.category?.color || Colors.primary.DEFAULT,
-          };
+        const catName = (tx.category?.name || tx.description || 'General').trim();
+        const lowerName = catName.toLowerCase();
+
+        if (!budgetedCatNames.has(lowerName)) {
+          if (!unbudgetedGroup[catName]) {
+            unbudgetedGroup[catName] = {
+              spent: 0,
+              icon: tx.category?.icon || 'HelpCircle',
+              color: tx.category?.color || Colors.primary.DEFAULT,
+            };
+          }
+          unbudgetedGroup[catName].spent += Number(tx.amount || 0);
         }
-        catGroup[catName].spent += Number(tx.amount || 0);
       });
 
-      return Object.keys(catGroup).map((catName, idx) => ({
-        id: `unbudgeted-${idx}-${catName}`,
-        name: catName,
-        icon: catGroup[catName].icon,
-        color: catGroup[catName].color,
-        allocatedAmount: 0,
-        spentAmount: catGroup[catName].spent,
-        hasBudget: false,
-      }));
+      Object.keys(unbudgetedGroup).forEach((catName, idx) => {
+        items.push({
+          id: `unbudgeted-${idx}-${catName}`,
+          name: catName,
+          icon: unbudgetedGroup[catName].icon,
+          color: unbudgetedGroup[catName].color,
+          allocatedAmount: 0,
+          spentAmount: unbudgetedGroup[catName].spent,
+          hasBudget: false,
+        });
+      });
     }
 
-    return [];
+    return items;
   }, [categories, expenses]);
 
   // ── Summary Status Breakdown ──
@@ -148,7 +184,7 @@ export default function CategoryBudgetReportScreen() {
 
     reportItems.forEach(item => {
       const status = getBudgetStatus(item.allocatedAmount, item.spentAmount, item.hasBudget);
-      if (status.status === 'under') underCount++;
+      if (status.status === 'under' || status.status === 'near') underCount++;
       else if (status.status === 'exact') exactCount++;
       else if (status.status === 'over') overCount++;
       else if (status.status === 'no_budget') noBudgetCount++;

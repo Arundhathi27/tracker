@@ -1,4 +1,3 @@
-import { BaseService } from './base';
 import { budgetService } from './budgetService';
 import { paymentMethodService } from './paymentMethodService';
 import { transactionService, CreateTransactionDto } from './transactionService';
@@ -6,7 +5,7 @@ import { Transaction } from '@/types';
 
 export interface ImportExpenseItem {
   rowNumber: number;
-  date: string; // YYYY-MM-DD (Preserved strictly as transaction date)
+  date: string; // YYYY-MM-DD
   amount: number;
   categoryName: string;
   paymentMethodName?: string;
@@ -20,7 +19,6 @@ export interface FailedImportRow {
 }
 
 export interface ImportResultSummary {
-  totalRequested: number;
   importedCount: number;
   skippedCount: number;
   failedCount: number;
@@ -28,27 +26,30 @@ export interface ImportResultSummary {
   monthCounts: Record<string, { label: string; count: number }>;
 }
 
-class ExpenseImportService extends BaseService {
+class ExpenseImportService {
   /**
-   * Fetches all unique category names used across user's budgets for fuzzy matching
+   * Fetches all unique category names defined across user's existing budgets
    */
   async getAllUserCategoryNames(): Promise<string[]> {
     try {
       const monthlyBudgets = await budgetService.getMonthlyBudgets();
       const nameSet = new Set<string>();
 
-      // Standard BudgetWise categories as baseline
-      ['Groceries', 'Rent', 'Vegetables', 'Food', 'Transport', 'Bills', 'Shopping', 'Gifts', 'Health'].forEach(c => nameSet.add(c));
+      // Baseline standard categories
+      ['Groceries', 'Rent', 'Vegetables', 'Food', 'Transport', 'Travel', 'Bills', 'Shopping', 'Gifts', 'Health', 'Personal Care', 'Housing', 'Fuel', 'Recharge', 'Family', 'Transfer', 'Other'].forEach(c => nameSet.add(c));
 
-      for (const mb of monthlyBudgets) {
-        const cats = await budgetService.getBudgetCategories(mb.id);
-        cats.forEach(c => {
-          if (c.name) nameSet.add(c.name.trim());
-        });
+      if (monthlyBudgets) {
+        for (const mb of monthlyBudgets) {
+          if (mb.budget_categories) {
+            mb.budget_categories.forEach(c => {
+              if (c.name) nameSet.add(c.name.trim());
+            });
+          }
+        }
       }
       return Array.from(nameSet);
     } catch {
-      return ['Groceries', 'Rent', 'Vegetables', 'Food', 'Transport', 'Bills', 'Shopping', 'Gifts', 'Health'];
+      return ['Groceries', 'Rent', 'Vegetables', 'Food', 'Transport', 'Travel', 'Bills', 'Shopping', 'Gifts', 'Health', 'Personal Care', 'Housing', 'Fuel', 'Recharge', 'Family', 'Transfer', 'Other'];
     }
   }
 
@@ -57,26 +58,23 @@ class ExpenseImportService extends BaseService {
    */
   async getExistingUserTransactions(): Promise<Transaction[]> {
     try {
-      return await transactionService.getTransactions({});
+      const txs = await transactionService.getTransactions({ limit: 1000 });
+      return txs || [];
     } catch {
       return [];
     }
   }
 
   /**
-   * Resolves monthly budgets and categories for historical import items,
-   * then batch inserts expenses into the transactions table.
-   * 
-   * CORE BUSINESS RULE:
-   * Expenses and Budgets are INDEPENDENT.
-   * - If a monthly budget exists: use it normally.
-   * - If NO monthly budget exists: DO NOT CREATE ONE. DO NOT UPDATE ONE.
-   *   JUST SAVE THE EXPENSE.
+   * Imports bulk expenses independently without creating fake budgets or fake categories.
+   * Add Budget screen remains the ONLY place where budgets/categories are created.
    */
-  async importExpenses(items: ImportExpenseItem[], skippedCount: number = 0): Promise<ImportResultSummary> {
+  async importExpenses(
+    items: ImportExpenseItem[],
+    skippedCount: number = 0
+  ): Promise<ImportResultSummary> {
     if (!items || items.length === 0) {
       return {
-        totalRequested: 0,
         importedCount: 0,
         skippedCount,
         failedCount: 0,
@@ -85,78 +83,46 @@ class ExpenseImportService extends BaseService {
       };
     }
 
-    const { data: userData, error: userError } = await this.supabase.auth.getUser();
-    if (userError) throw userError;
-
-    // 1. Group items by exact transaction YYYY-MM (preserving historical date)
+    // 1. Group items by month (YYYY-MM) based strictly on transaction date
     const itemsByMonth: Record<string, ImportExpenseItem[]> = {};
-    const monthCounts: Record<string, { label: string; count: number }> = {};
-
     items.forEach(item => {
-      const monthKey = item.date.substring(0, 7); // e.g. "2026-01" for Jan 2026
+      const monthKey = item.date.substring(0, 7);
       if (!itemsByMonth[monthKey]) {
         itemsByMonth[monthKey] = [];
-        const d = new Date(item.date + 'T00:00:00');
-        const label = d.toLocaleString('default', { month: 'long', year: 'numeric' });
-        monthCounts[monthKey] = { label, count: 0 };
       }
       itemsByMonth[monthKey].push(item);
     });
 
-    // 2. Fetch existing payment methods for user
-    const paymentMethods = await paymentMethodService.getPaymentMethods();
+    // 2. Fetch user's existing payment methods
+    const userPaymentMethods = await paymentMethodService.getPaymentMethods();
     const pmMap: Record<string, string> = {};
-    paymentMethods.forEach(pm => {
+    (userPaymentMethods || []).forEach(pm => {
       pmMap[pm.name.toLowerCase().trim()] = pm.id;
     });
 
-    const categoryIdMap: Record<string, Record<string, string>> = {}; // monthKey -> (catNameLower -> catId)
+    // 3. Resolve category IDs from existing user categories without creating fake budgets or categories
+    const allMonthlyBudgets = await budgetService.getMonthlyBudgets();
+    const userGlobalCategoryMap: Record<string, string> = {};
 
-    // 3. Resolve monthly budgets and budget categories per month WITHOUT creating fake budgets
-    for (const monthKey of Object.keys(itemsByMonth)) {
-      const monthlyBudget = await budgetService.getMonthlyBudgetByMonth(monthKey);
-      const catMap: Record<string, string> = {};
-
-      if (monthlyBudget) {
-        // IF A MONTHLY BUDGET EXISTS: Use existing budget normally
-        const existingCats = await budgetService.getBudgetCategories(monthlyBudget.id);
-        existingCats.forEach(c => {
-          catMap[c.name.toLowerCase().trim()] = c.id;
-        });
-
-        const uniqueCatNames = Array.from(
-          new Set(itemsByMonth[monthKey].map(i => i.categoryName.trim()))
-        );
-
-        for (const rawCatName of uniqueCatNames) {
-          const lowerName = rawCatName.toLowerCase().trim();
-          if (!catMap[lowerName]) {
-            const newCat = await budgetService.createBudgetCategory({
-              monthly_budget_id: monthlyBudget.id,
-              name: rawCatName,
-              icon: 'HelpCircle',
-              color: '#6B4F3A',
-              allocated_amount: 0,
-            });
-            catMap[lowerName] = newCat.id;
-          }
+    if (allMonthlyBudgets) {
+      allMonthlyBudgets.forEach(mb => {
+        if (mb.budget_categories) {
+          mb.budget_categories.forEach(c => {
+            if (c.name) {
+              userGlobalCategoryMap[c.name.toLowerCase().trim()] = c.id;
+            }
+          });
         }
-      }
-      // IF NO MONTHLY BUDGET EXISTS:
-      // DO NOT CREATE ONE. DO NOT UPDATE ONE. DO NOT INSERT Fake $0 BUDGET.
-      // Transactions will be saved directly in public.transactions.
-
-      categoryIdMap[monthKey] = catMap;
+      });
     }
 
-    // 4. Map import items to CreateTransactionDto with original row reference
+    // 4. Map import items to CreateTransactionDto
     const mappedItems: { item: ImportExpenseItem; dto: CreateTransactionDto }[] = items.map(item => {
-      const monthKey = item.date.substring(0, 7);
-      const catMap = categoryIdMap[monthKey] || {};
-      const catId = catMap[item.categoryName.toLowerCase().trim()] || null;
+      const catLower = item.categoryName.toLowerCase().trim();
+      const catId = userGlobalCategoryMap[catLower] || null;
 
       let pmId: string | null = null;
-      if (item.paymentMethodName) {
+      if (item.paymentMethodName && item.paymentMethodName.toLowerCase().trim() !== 'not specified') {
         pmId = pmMap[item.paymentMethodName.toLowerCase().trim()] || null;
       }
 
@@ -166,7 +132,7 @@ class ExpenseImportService extends BaseService {
           type: 'expense',
           amount: item.amount,
           description: item.description || item.categoryName,
-          date: item.date, // Preserves exact transaction date (e.g. 2026-01-15)
+          date: item.date, // Transaction date determines month
           category_id: catId,
           payment_method_id: pmId,
         },
@@ -183,41 +149,40 @@ class ExpenseImportService extends BaseService {
       const dtosChunk = chunk.map(c => c.dto);
 
       try {
-        const inserted = await transactionService.createTransactionsBatch(dtosChunk);
-        if (inserted) {
-          importedCount += inserted.length;
-          inserted.forEach(tx => {
-            const mKey = tx.date.substring(0, 7);
-            if (monthCounts[mKey]) {
-              monthCounts[mKey].count += 1;
-            }
-          });
-        }
+        const createdTxs = await transactionService.createTransactionsBatch(dtosChunk);
+        importedCount += (createdTxs || []).length;
       } catch (err: any) {
-        // Fallback: If batch insert fails, insert individually to isolate failed rows
-        for (const entry of chunk) {
+        // Fall back to item-by-item insertion to isolate failures
+        for (const itemPair of chunk) {
           try {
-            const single = await transactionService.createTransaction(entry.dto);
-            if (single) {
-              importedCount += 1;
-              const mKey = single.date.substring(0, 7);
-              if (monthCounts[mKey]) {
-                monthCounts[mKey].count += 1;
-              }
-            }
+            await transactionService.createTransaction(itemPair.dto);
+            importedCount += 1;
           } catch (singleErr: any) {
             failedRows.push({
-              rowNumber: entry.item.rowNumber,
-              item: entry.item,
-              errorReason: singleErr.message || 'Failed to insert transaction row',
+              rowNumber: itemPair.item.rowNumber,
+              item: itemPair.item,
+              errorReason: singleErr.message || 'Database insertion error',
             });
           }
         }
       }
     }
 
+    // 6. Build month breakdown summary
+    const monthCounts: Record<string, { label: string; count: number }> = {};
+    items.forEach(item => {
+      if (!failedRows.some(f => f.rowNumber === item.rowNumber)) {
+        const monthKey = item.date.substring(0, 7);
+        if (!monthCounts[monthKey]) {
+          const d = new Date(item.date + 'T00:00:00');
+          const label = d.toLocaleString('default', { month: 'long', year: 'numeric' });
+          monthCounts[monthKey] = { label, count: 0 };
+        }
+        monthCounts[monthKey].count += 1;
+      }
+    });
+
     return {
-      totalRequested: items.length,
       importedCount,
       skippedCount,
       failedCount: failedRows.length,
